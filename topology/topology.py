@@ -3,7 +3,7 @@ from mininet.net import Mininet
 from mininet.node import RemoteController, OVSSwitch
 from mininet.cli import CLI
 from mininet.log import setLogLevel
-
+from mininet.link import TCLink
 
 class SlicingTopo(Topo):
 
@@ -31,7 +31,8 @@ class SlicingTopo(Topo):
         self.addLink(h6, s2)
 
         # Switch -> switch
-        self.addLink(s1, s2)
+        self.addLink(s1, s2, cls=TCLink, bw=10, delay='5ms')
+        
 
 
 def run():
