@@ -1,948 +1,415 @@
 # AI-Driven Safe Dynamic Network Slicing for SLA-Preserving SDN Networks
 
+[![Tests](https://img.shields.io/badge/Tests-83%20Passed-brightgreen)](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/tests)
+[![Python](https://img.shields.io/badge/Python-3.9%20%7C%203.10%20%7C%203.11-blue)](https://www.python.org/)
+[![SDN](https://img.shields.io/badge/SDN-Ryu%204.34%20%2B%20OpenFlow%201.3-orange)](https://ryu-sdn.org/)
+[![Data Plane](https://img.shields.io/badge/Data%20Plane-Mininet%20%2B%20Open%20vSwitch-lightgrey)](http://mininet.org/)
+
+---
+
 ## 1. Project Overview
 
-This project develops an **AI-driven dynamic network slicing system for Software-Defined Networks (SDN)**.
+This project implements an **AI-driven, safety-constrained dynamic network slicing system** for Software-Defined Networks (SDN).
 
-The main goal is to dynamically allocate network resources among different traffic classes while protecting critical traffic from SLA violations and considering security-related performance overhead.
+In shared multi-tenant networks, high-bandwidth applications (such as 4K/8K video streaming) compete for bottleneck link capacity against mission-critical traffic (such as autonomous control and industrial sensors). Unregulated competition causes bufferbloat, queuing delays, and packet loss, leading to severe Service Level Agreement (SLA) violations.
 
-The project follows the principle:
+### Core Architecture Principle
 
-> **Let AI optimize the network, but do not let AI optimize at the cost of a critical SLA.**
+> **"Let AI optimize the network, but never let AI optimize at the cost of a critical SLA."**
 
-The final system is planned as a closed-loop architecture:
+The system establishes an architectural boundary between optimization and safety:
+- **Optimization Layer (AI):** A Security- and Risk-Aware Linear Upper Confidence Bound ([`SRALinUCB`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/ai/linucb.py#L59)) agent explores resource adjustments to maximize bandwidth utilization.
+- **Safety Layer (Guardrail):** An independent deterministic verifier ([`SLASecurityGuardrail`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/guardrail/guardrail.py#L35)) intercepts candidate actions and enforces hard capacity, latency, loss, and security constraints *before* any flow modifications reach the OpenFlow switches.
 
 ```text
-Network Traffic
-      ↓
-SDN Network & Network Slices
-      ↓
-Network Telemetry
-      ↓
-Context / Feature Extraction
-      ↓
-SRA-LinUCB AI
-      ↓
-Candidate Resource + Security Action
-      ↓
-SLA & Security Guardrail
-      ↓
-   SAFE / UNSAFE
-    ↓       ↓
- Execute   Reject / Repair
-    ↓
-Ryu SDN Controller
-    ↓
-OpenFlow
-    ↓
-OVS / Mininet Network
-    ↓
-Performance Measurement
-    ↓
-Feedback & Learning
-    └──────────────→ AI
+               ┌────────────────────────────────────────────────────────┐
+               │              Physical / Emulated Data Plane            │
+               │   Mininet 2.3.0 + Open vSwitch (OVS 3.3.9) Switches    │
+               │   [H1..H3] ─── S1 ════(10 Mbps Bottleneck)════ S2 ─── [H4..H6] │
+               └──────────────────────────┬─────────────────────────────┘
+                                          │ Active Probes & Queue Stats
+                                          ▼
+               ┌────────────────────────────────────────────────────────┐
+               │           Module 02: Network Telemetry Collector       │
+               │  - Active RTT/Loss via mnexec inside host namespaces    │
+               │  - Passive /sys/class/net interface byte counters      │
+               │  - Linux Traffic Control (tc) egress queue backlog     │
+               └──────────────────────────┬─────────────────────────────┘
+                                          │ TelemetryRecord / dict
+                                          ▼
+               ┌────────────────────────────────────────────────────────┐
+               │         Module 03: Context & Feature Extraction        │
+               │  - Defensive sentinel sanitization (-1.0 ms -> worst)  │
+               │  - Dynamic temporal trend extraction (lat_t - lat_prev)│
+               │  - Normalization to [0.0, 1.0] -> 6D Vector x_t in R^6 │
+               └──────────────────────────┬─────────────────────────────┘
+                                          │ Context Vector x_t
+                                          ▼
+               ┌────────────────────────────────────────────────────────┐
+               │             Module 04: SRA-LinUCB Decision Engine      │
+               │  - Multi-armed contextual bandit (d=6, K=3)            │
+               │  - Ridge regression via np.linalg.solve()              │
+               │  - Risk-penalized score: UCB_a - lambda * rho_a * R(x) │
+               └──────────────────────────┬─────────────────────────────┘
+                                          │ Candidate Action (0, 1, or 2)
+                                          ▼
+               ┌────────────────────────────────────────────────────────┐
+               │      Module 06: Deterministic SLA & Security Guardrail │
+               │  - Module 05 Security State & Overhead Profile         │
+               │  - Hard Capacity Limit: sum(BW) <= 10.0 Mbps           │
+               │  - URLLC Latency Gate: latency <= 15.0 ms              │
+               │  - Loss Gate: loss <= 1.0% | Risk Gate: risk <= 0.7    │
+               └──────────────┬──────────────────────────┬──────────────┘
+                              │ SAFE                     │ UNSAFE
+                              ▼                          ▼
+               ┌────────────────────────┐  ┌────────────────────────────┐
+               │   Approved Action      │  │ REJECT or DETERMINISTIC    │
+               │   Forwarded to SDN     │  │ REPAIR to Safe Allocation  │
+               └──────────────┬─────────┘  └─────────────┬──────────────┘
+                              │                          │
+                              └───────────┬──────────────┘
+                                          │ Safe Enforcement
+                                          ▼
+               ┌────────────────────────────────────────────────────────┐
+               │             Module 07: Ryu OpenFlow 1.3 Controller     │
+               │  - Dynamic meter & queue slice reconfiguration         │
+               │  - MAC-learning L2 forwarding on TCP port 6633         │
+               └────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-# 2. Problem Being Solved
+## 2. Network Topology & Baseline Congestion Problem
 
-A shared network carries different types of traffic with different requirements.
+The experimental topology is implemented in [`topology/topology.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/topology/topology.py) using Mininet, Open vSwitch, and Linux Traffic Control (`tc`).
 
-For our project, we model three slices:
+### Logical Slices & Service Level Agreements
 
-| Slice | Hosts | Traffic Type | Main Requirement |
+| Slice | Host Pair | Traffic Profile | Service Level Agreement (SLA) |
 |---|---|---|---|
-| URLLC | H1 ↔ H4 | Critical / low-latency | Low latency |
-| eMBB | H2 ↔ H5 | High-bandwidth | High throughput |
-| Best Effort | H3 ↔ H6 | Normal traffic | Remaining resources |
+| **URLLC** | Host `H1` $\leftrightarrow$ Host `H4` | Mission-critical low-latency | Latency $\le 15.0\text{ ms}$, Loss $\le 1.0\%$, Min Bandwidth $\ge 2.0\text{ Mbps}$ |
+| **eMBB** | Host `H2` $\leftrightarrow$ Host `H5` | High-bandwidth multimedia | Best-effort high throughput up to bottleneck capacity |
+| **Best Effort (BE)** | Host `H3` $\leftrightarrow$ Host `H6` | Background web/elastic traffic | Remaining unallocated capacity |
 
-A problem occurs when high-bandwidth eMBB traffic consumes shared network capacity.
-
-For example:
+### Physical Bottleneck Configuration
 
 ```text
-eMBB burst
-    ↓
-Shared bottleneck becomes congested
-    ↓
-Queue increases
-    ↓
-URLLC packets wait longer
-    ↓
-URLLC latency increases
-    ↓
-Critical SLA may be violated
+   H1 (URLLC Source) ────┐                                ┌──── H4 (URLLC Sink)
+   H2 (eMBB Source)  ────┤        10 Mbps Bottleneck      ├──── H5 (eMBB Sink)
+   H3 (BE Source)    ────┴── Switch S1 ════════ Switch S2 ──┴──── H6 (BE Sink)
+                               (s1-eth4)    (s2-eth4)
+                              Delay: 5 ms, Buffer: 50 pkts
 ```
 
-The project therefore aims to use a lightweight AI controller to adapt resource allocation while an independent safety layer prevents unsafe decisions.
+- **Switches:** Two Open vSwitch bridges (`S1`, `S2`) connected via OpenFlow 1.3 to the Ryu controller.
+- **Bottleneck Link:** The inter-switch link (`s1-eth4` $\leftrightarrow$ `s2-eth4`) is constrained to **10 Mbps** bandwidth with a **5 ms propagation delay** (minimum round-trip time $\approx 10\text{ ms}$) and a Linux `tc` queue limit of **50 packets**.
+
+### Empirical Baseline Results (Unregulated Network)
+
+Baseline experiments conducted with concurrent `iperf3` (eMBB) and high-frequency `ping` (URLLC) prove the starvation problem:
+
+```text
+[Baseline Testbed Measurements]
+1. Idle / URLLC Alone:
+   Latency: Min = 10.09 ms, Avg = 10.15 ms, Max = 11.20 ms | Loss = 0.0%  --> SAFE (Within SLA)
+
+2. Unregulated eMBB Burst (9.0 Mbps iperf3):
+   Latency: Min = 10.09 ms, Avg = 29.88 ms, Max = 122.44 ms | Loss = 0.0% --> VIOLATION (> 15 ms SLA)
+```
+
+Because average latency nearly triples under heavy eMBB traffic, dynamic slice adaptation with hard safety enforcement is required.
 
 ---
 
-# 3. Main Project Components
+## 3. Implemented Modules & Technical Formulas
 
-The complete project is divided into nine modules:
+### Module 01: SDN Network & Slicing Topology
+- **Implementation:** [`topology/topology.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/topology/topology.py)
+- Builds the 2-switch, 6-host Mininet topology. Configures per-interface bandwidth and delay using Linux HTB qdiscs.
 
-```text
-01. SDN Network & Slicing
-02. Network Telemetry
-03. Context & Feature
-04. SRA-LinUCB AI
-05. Security
-06. SLA & Security Guardrail
-07. SDN Control
-08. Feedback & Learning
-09. Evaluation & Comparison
-```
+### Module 07: SDN Control Plane
+- **Implementation:** [`controller/ryu_controller.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/controller/ryu_controller.py)
+- Ryu OpenFlow 1.3 MAC-learning switch controller listening on `0.0.0.0:6633`. Dynamically installs bidirectional flow entries, achieving **0% packet loss** across all host pairs during `pingall`.
 
-## Module 01 — SDN Network & Slicing
+### Module 02: Network Telemetry Collector
+- **Implementation:** [`telemetry/monitor.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/telemetry/monitor.py)
+- **Key Class:** [`TelemetryRecord`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/telemetry/monitor.py#L29) dataclass.
+- **Collection Techniques:**
+  1. *Active Probing:* Runs `mnexec -a <H1_PID> ping -c <count> -i 0.2 <H4_IP>` directly inside host `H1`'s network namespace, avoiding host-isolation anomalies.
+  2. *Passive Interface Monitoring:* Reads bytes from `/sys/class/net/s1-eth4/statistics/`.
+  3. *Queue Backlog Monitoring:* Parses `tc -s qdisc show dev s1-eth4` to extract current packet queue depth.
+  4. *Defensive Sentinel:* Returns `-1.0 ms` latency and `100.0%` loss on dropped probes without crashing.
+  5. *Persistence:* Thread-safe CSV appending to `data/telemetry.csv`.
+- **Status:** **15 unit tests passing** in [`telemetry/test_telemetry.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/telemetry/test_telemetry.py).
 
-Creates the software-defined network using:
+### Module 03: Context & Feature Extraction
+- **Implementation:** [`ai/context_builder.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/ai/context_builder.py)
+- **Key Class:** [`ContextBuilder`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/ai/context_builder.py#L31)
+- **Mathematical Transformation:** Maps raw telemetry into a bounded 6D context vector $\mathbf{x}_t \in \mathbb{R}^6$:
 
-- Mininet
-- Open vSwitch (OVS)
-- OpenFlow 1.3
-- Three logical traffic classes
+$$\mathbf{x}_t = \begin{bmatrix}
+x_0 \\
+x_1 \\
+x_2 \\
+x_3 \\
+x_4 \\
+x_5
+\end{bmatrix} = \begin{bmatrix}
+1.0 & \text{(Bias / Intercept)} \\
+\min\left(1.0, \frac{\text{URLLC Latency (ms)}}{50.0}\right) & \text{(Normalized Latency)} \\
+\min\left(1.0, \frac{\text{Throughput (Mbps)}}{10.0}\right) & \text{(Normalized Bottleneck Rate)} \\
+\min\left(1.0, \frac{\text{Queue Backlog (pkts)}}{50.0}\right) & \text{(Normalized Buffer Depth)} \\
+\text{clip}\left(\frac{\text{Latency}_t - \text{Latency}_{t-1}}{10.0}, -1.0, 1.0\right) & \text{(Temporal Latency Velocity)} \\
+\frac{\text{Packet Loss (\%)}}{100.0} & \text{(Normalized Packet Loss Ratio)}
+\end{bmatrix}$$
 
-Current topology:
+- **Sentinel Handling:** Latency sentinel `-1.0 ms` is mapped to worst-case $x_1 = 1.0$.
+- **Status:** **17 unit tests passing** in [`ai/test_context_builder.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/ai/test_context_builder.py).
 
-```text
- H1 ─┐
- H2 ─┤
- H3 ─┤
-     S1 ═════════ S2
- H4 ─┤            ├─ H4
- H5 ─┤            ├─ H5
- H6 ─┘            └─ H6
-```
+### Module 04: SRA-LinUCB Decision Engine
+- **Implementation:** [`ai/linucb.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/ai/linucb.py)
+- **Key Class:** [`SRALinUCB`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/ai/linucb.py#L59)
+- **Action Space ($K=3$):**
+  - Action `0`: `DECREASE_EMBB` (Throttles eMBB; de-congesting risk profile $\rho_0 = -1.0$)
+  - Action `1`: `MAINTAIN` (Holds steady; neutral risk profile $\rho_1 = 0.0$)
+  - Action `2`: `INCREASE_EMBB` (Expands eMBB; congestion risk profile $\rho_2 = +1.0$)
+- **Formulas & Algorithm:**
+  - Online Ridge Regression Precision Matrix:
+    $$A_a = I_6 + \sum_{\tau=1}^t \mathbf{x}_\tau \mathbf{x}_\tau^T \in \mathbb{R}^{6 \times 6}$$
+  - Reward-Weighted Context Accumulator:
+    $$\mathbf{b}_a = \sum_{\tau=1}^t r_\tau \mathbf{x}_\tau \in \mathbb{R}^6$$
+  - Weight estimate $\hat{\boldsymbol{\theta}}_a$ calculated using numerically stable solver `np.linalg.solve(A_a, b_a)`.
+  - Context Risk Indicator:
+    $$R(\mathbf{x}_t) = w_1 x_1 + w_3 x_3 + w_4 \max(0, x_4) + w_5 x_5, \quad \mathbf{w} = [0.4, 0.3, 0.2, 0.1]$$
+  - Final Selection Score:
+    $$\text{Score}_a(\mathbf{x}_t) = \mathbf{x}_t^T \hat{\boldsymbol{\theta}}_a + \alpha \sqrt{\mathbf{x}_t^T A_a^{-1} \mathbf{x}_t} - \lambda \rho_a R(\mathbf{x}_t)$$
+  - Candidate Action:
+    $$a^* = \arg\max_{a \in \{0, 1, 2\}} \text{Score}_a(\mathbf{x}_t)$$
+- **Status:** **11 unit tests passing** in [`ai/test_linucb.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/ai/test_linucb.py).
 
-More accurately, H1/H2/H3 connect to S1 and H4/H5/H6 connect to S2.
+### Module 05: Security & Overhead Profiling
+- **Implementation:** [`security/security_config.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/security/security_config.py), [`security/security_metrics.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/security/security_metrics.py), [`security/wireguard_adapter.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/security/wireguard_adapter.py)
+- **Key Classes:** [`SecurityState`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/security/security_config.py#L37), [`SecurityMetrics`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/security/security_metrics.py#L12), [`WireGuardAdapter`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/security/wireguard_adapter.py#L13).
+- Models crypto tunnel overhead (crypto latency inflation, throughput penalty, loss delta) and distinguishes configured defaults from measured live telemetry.
+- **Status:** **13 unit tests passing** in [`tests/test_security.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/tests/test_security.py).
 
-The S1-S2 link is intentionally configured as a **10 Mbps bottleneck with 5 ms delay** to create a controlled congestion environment.
-
-### Current status
-
-**Implemented and tested.**
+### Module 06: Deterministic SLA & Security Guardrail
+- **Implementation:** [`guardrail/guardrail.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/guardrail/guardrail.py), [`guardrail/sla_config.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/guardrail/sla_config.py)
+- **Key Class:** [`SLASecurityGuardrail`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/guardrail/guardrail.py#L35)
+- **Deterministic Hard Constraints:**
+  1. Total link capacity: $\sum BW_{\text{slices}} \le 10.0\text{ Mbps}$
+  2. URLLC minimum guaranteed bandwidth: $BW_{\text{URLLC}} \ge 2.0\text{ Mbps}$
+  3. URLLC latency SLA: Measured latency $\le 15.0\text{ ms}$
+  4. URLLC packet loss threshold: Measured loss $\le 1.0\%$
+  5. Security threat threshold: Risk level $\le 0.70$
+  6. Security overhead threshold: Added crypto delay $\le 5.0\text{ ms}$
+- **Deterministic Repair:** Clamps over-allocated bandwidth configurations while guaranteeing the minimum URLLC reservation.
+- **Status:** **14 unit tests passing** in [`tests/test_guardrail.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/tests/test_guardrail.py).
 
 ---
 
-# 4. Module 07 — SDN Control
+## 4. Verification & Test Suite (83 / 83 Passing)
 
-The SDN control plane uses:
-
-- Ryu Controller
-- OpenFlow 1.3
-- MAC-learning based forwarding
-
-The controller receives packets from OVS when necessary, learns source MAC addresses, determines the output port for known destinations, and installs forwarding flows.
-
-Basic flow:
-
-```text
-Host
- ↓
-OVS
- ↓
-OpenFlow
- ↓
-Ryu Controller
- ↓
-Forwarding Decision
- ↓
-OVS
- ↓
-Destination Host
-```
-
-### Current status
-
-**Basic controller implementation completed and tested.**
-
-The network was tested using:
+The project includes an automated test suite comprising **83 tests**, verifying individual unit math, edge cases, and end-to-end integration across modules.
 
 ```bash
-pingall
+pytest -q
+# Output: 83 passed in 0.95s
 ```
 
-and achieved:
+### Complete Test Breakdown
 
-```text
-0% dropped
-```
+| Test Suite | Path | Count | Status | Scope |
+|---|---|:---:|:---:|---|
+| **Telemetry Tests** | [`telemetry/test_telemetry.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/telemetry/test_telemetry.py) | 15 | Passed | Ping parsing, rate derivation, queue stats, CSV logging |
+| **Context Builder Tests** | [`ai/test_context_builder.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/ai/test_context_builder.py) | 17 | Passed | 6D normalization, bounds, trend clipping, sentinel handling |
+| **SRA-LinUCB Tests** | [`ai/test_linucb.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/ai/test_linucb.py) | 11 | Passed | Ridge updates, numerical stability, risk penalties, UCB math |
+| **M2 $\rightarrow$ M3 $\rightarrow$ M4 Pipeline** | [`ai/test_integration.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/ai/test_integration.py) | 6 | Passed | End-to-end telemetry $\rightarrow$ context $\rightarrow$ action selection |
+| **Security Profiling Tests** | [`tests/test_security.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/tests/test_security.py) | 13 | Passed | SecurityState, overhead metrics, WireGuard adapter |
+| **SLA Guardrail Tests** | [`tests/test_guardrail.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/tests/test_guardrail.py) | 14 | Passed | SLA gates, capacity limits, repair logic, discrete actions |
+| **End-to-End Pipeline Guardrail** | [`tests/test_pipeline_guardrail.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/tests/test_pipeline_guardrail.py) | 7 | Passed | M2 $\rightarrow$ M3 $\rightarrow$ M4 $\rightarrow$ M6 closed-loop validation |
+| **Total** | **Full Regression Suite** | **83** | **100% Passed** | Complete cross-module regression |
 
-This confirms that the basic Mininet + OVS + Ryu forwarding setup is working.
+### Key Verified Pipeline Scenarios
+
+The integration tests in [`tests/test_pipeline_guardrail.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/tests/test_pipeline_guardrail.py) explicitly verify:
+1. **Healthy Network:** Safe context approves candidate actions (`is_safe = True, violations = []`).
+2. **Latency SLA Violation:** Latency $> 15.0\text{ ms}$ immediately rejected with `URLLC_LATENCY_VIOLATION`.
+3. **Packet Loss SLA Violation:** Loss $> 1.0\%$ immediately rejected with `PACKET_LOSS_VIOLATION`.
+4. **Congestion Protection:** High latency/queue state suppresses unsafe `INCREASE_EMBB` (Action 2).
+5. **Deterministic Repair:** Over-allocated total bandwidth ($> 10\text{ Mbps}$) is scaled down while preserving URLLC $\ge 2\text{ Mbps}$.
+6. **Security Threat & Overhead:** Risk level $> 0.70$ or added crypto delay $> 5.0\text{ ms}$ is flagged and blocked.
+7. **Exact Boundary Conditions:** Confirms exact equality thresholds ($\le 15.0\text{ ms}$, $\le 1.0\%$) behave consistently.
 
 ---
 
-# 5. Current Experimental Network
+## 5. Future Remaining Work
 
-The current topology contains:
-
-```text
-Hosts:
-H1 = URLLC source
-H2 = eMBB source
-H3 = Best-Effort source
-
-H4 = URLLC destination
-H5 = eMBB destination
-H6 = Best-Effort destination
-
-Switches:
-S1
-S2
-
-Controller:
-Ryu
-
-Protocol:
-OpenFlow 1.3
-```
-
-Traffic mapping:
+The remaining project phases will complete data-plane actuation, online reward feedback, comparative evaluation benchmarks, and live visualization.
 
 ```text
-H1 ───────── H4     URLLC
-H2 ───────── H5     eMBB
-H3 ───────── H6     Best Effort
-```
-
-The S1-S2 link is configured as:
-
-```text
-Bandwidth = 10 Mbps
-Delay     = 5 ms
-```
-
-This bottleneck allows us to study congestion and its effect on critical traffic.
-
----
-
-# 6. Initial Congestion Experiment Already Completed
-
-We tested eMBB traffic using iperf3.
-
-Example:
-
-```bash
-h5 iperf3 -s -D
-h2 iperf3 -c 10.0.0.5 -t 20 -b 9M
-```
-
-The eMBB traffic achieved approximately:
-
-```text
-9 Mbps
-```
-
-We then ran URLLC traffic simultaneously:
-
-```bash
-h4 iperf3 -s -D
-h1 ping -i 0.1 -c 200 h4 &
-h2 iperf3 -c 10.0.0.5 -t 20 -b 9M
-```
-
-The experiment demonstrated that heavy eMBB traffic can significantly increase URLLC latency.
-
-Observed experimental result:
-
-```text
-URLLC packet loss   = 0%
-Average latency     ≈ 29.88 ms
-Maximum latency     ≈ 122.44 ms
-Minimum latency     ≈ 10.09 ms
-```
-
-These values are from our Mininet experiment and are **experimental results, not universal network standards**.
-
-Our project currently uses **15 ms as an experimental URLLC SLA boundary** for evaluating the safety mechanism.
-
-Therefore:
-
-```text
-Latency ≤ 15 ms
-      ↓
-Safe region
-
-Latency > 15 ms
-      ↓
-SLA risk / violation
-```
-
-This experiment establishes the baseline problem that the AI-driven dynamic slicing system is intended to address.
-
----
-
-# 7. Planned AI Component — SRA-LinUCB
-
-The project uses:
-
-**Security- and Risk-Aware LinUCB (SRA-LinUCB)**
-
-It is a lightweight contextual-bandit approach.
-
-The AI observes the current network context and selects a candidate resource-allocation action.
-
-Example context:
-
-```text
-x_t = [
-    eMBB throughput,
-    packet loss,
-    URLLC latency,
-    queue occupancy,
-    traffic rate,
-    latency trend,
-    security risk,
-    security overhead
-]
-```
-
-Example actions:
-
-```text
-A1 → Increase eMBB allocation
-A2 → Maintain allocation
-A3 → Decrease eMBB allocation
-```
-
-Security level can later be included as part of the action:
-
-```text
-Low
-Medium
-High
-```
-
-The important design principle is:
-
-```text
-AI proposes an action
-        ↓
-Safety layer validates it
-        ↓
-Only safe actions are executed
-```
-
-The AI should not directly bypass the safety layer.
-
----
-
-# 8. Planned SLA & Security Guardrail
-
-The safety layer checks whether an AI-generated action could violate important constraints.
-
-Example checks:
-
-```text
-Bandwidth constraint
-        +
-URLLC latency constraint
-        +
-Packet-loss constraint
-        +
-Security-risk constraint
-        +
-Security-overhead constraint
-```
-
-Decision:
-
-```text
-Candidate AI Action
-        ↓
-   Safety Check
-     /       \
-  SAFE      UNSAFE
-   ↓          ↓
-Execute    Reject/Repair
-```
-
-This provides explicit protection instead of relying only on an AI reward function.
-
----
-
-# 9. Planned Security Component
-
-The security component will study the trade-off between network protection and network performance.
-
-A practical candidate is an encrypted tunnel such as WireGuard.
-
-The experiments will compare:
-
-```text
-Security OFF
-     vs
-Security ON
-```
-
-Measurements can include:
-
-- latency
-- throughput
-- packet loss
-- encryption/tunnel overhead
-- CPU/processing overhead where measurable
-
-The purpose is not to invent a new encryption method, but to measure how security protection affects network performance and incorporate that effect into safe resource allocation.
-
----
-
-# 10. Planned Feedback & Learning
-
-The final system will operate as a closed loop:
-
-```text
-Observe
-   ↓
-Decide
-   ↓
-Validate
-   ↓
-Act
-   ↓
-Measure
-   ↓
-Learn
-   ↓
-Repeat
-```
-
-The actual network performance after an action will be used to calculate a reward and update the LinUCB model.
-
----
-
-# 11. Planned Evaluation
-
-The final evaluation will compare three approaches:
-
-### A. Static Slicing
-
-Fixed resource allocation.
-
-```text
-Traffic changes
-     ↓
-Allocation remains fixed
-```
-
-### B. Dynamic AI Without Safety
-
-```text
-Telemetry
-   ↓
-LinUCB
-   ↓
-Action
-   ↓
-Network
-```
-
-This demonstrates the benefit of AI adaptation but also allows us to study the risk of unsafe decisions.
-
-### C. Proposed Safe Dynamic Slicing
-
-```text
-Telemetry
-   ↓
-SRA-LinUCB
-   ↓
-SLA/Security Guardrail
-   ↓
-Safe Action
-   ↓
-Network
-```
-
-Main evaluation metrics:
-
-- URLLC latency
-- eMBB throughput
-- packet loss
-- resource utilization
-- SLA violation count/duration
-- recovery time
-- security overhead
-- processing overhead where measurable
-
----
-
-# 12. Current Project Status
-
-## Completed
-
-```text
-✓ Project repository created
-✓ WSL2 development environment
-✓ VS Code connected to WSL
-✓ Python/Ryu environment configured
-✓ Mininet installed
-✓ Open vSwitch installed
-✓ iperf3 installed
-✓ Mininet topology implemented
-✓ OpenFlow 1.3 configured
-✓ Ryu controller implemented
-✓ Basic MAC-learning forwarding implemented
-✓ Three traffic classes configured
-✓ 10 Mbps bottleneck created
-✓ eMBB throughput experiment completed
-✓ URLLC + eMBB congestion experiment completed
-✓ Preliminary latency/throughput measurements obtained
-```
-
-## In Progress / Next
-
-```text
-→ Automated Network Telemetry
-→ CSV telemetry storage
-→ Context / feature extraction
-→ SRA-LinUCB implementation
-→ SLA & Security Guardrail
-→ Security experiment
-→ Feedback and learning loop
-→ Static vs Dynamic vs Safe-Dynamic evaluation
-→ Graphs and final analysis
-→ Dashboard / final integration
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                                FUTURE REMAINING WORK                                   │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                        │
+│  PHASE 8: Module 08 — Closed-Loop Reward Engine & Feedback                             │
+│  ─────────────────────────────────────────────────────────                             │
+│  1. Implement ai/reward_engine.py:                                                     │
+│     - Multi-objective scalar reward function:                                          │
+│       r_t = w_tput * Throughput_norm - w_lat * Latency_norm - w_loss * Loss_norm       │
+│             - SLA_Penalty(t)                                                           │
+│     - Non-linear quadratic barrier penalty:                                            │
+│       SLA_Penalty(t) = beta * (max(0, Latency_ms - 15.0))^2                            │
+│     - Online learning feedback loop:                                                   │
+│       Collect telemetry at t+1 -> compute r_t -> call SRALinUCB.update(a_t, x_t, r_t)  │
+│                                                                                        │
+│  PHASE 9: Data-Plane Dynamic Actuation (Ryu Meter & Queue Control)                     │
+│  ─────────────────────────────────────────────────────────────────                     │
+│  1. Implement controller/slicing_actuator.py:                                          │
+│     - Connect guardrail-approved safe action directly to OpenFlow 1.3 switches:        │
+│       * Approach A: OpenFlow 1.3 Meter Bands (OFPMeterMod) per slice flow.             │
+│       * Approach B: Dynamic Linux HTB QoS Queues via ovs-vsctl and tc.                 │
+│     - Ensure hitless bandwidth adjustments without interrupting active TCP streams.    │
+│                                                                                        │
+│  PHASE 10: Module 09 — Comprehensive Comparative Evaluation & Benchmarks               │
+│  ───────────────────────────────────────────────────────────────────────               │
+│  1. Automated experimental test harness (experiments/run_evaluation.py):               │
+│     Evaluate and compare THREE distinct control paradigms under identical traffic:    │
+│     - Benchmark 1: Static Slicing (Fixed 3 Mbps URLLC / 5 Mbps eMBB / 2 Mbps BE).      │
+│     - Benchmark 2: Unsafe AI Dynamic Slicing (LinUCB directly actuating without M6).   │
+│     - Benchmark 3: Proposed AI-Safe Dynamic Slicing (SRA-LinUCB + SLA Guardrail).      │
+│  2. Quantitative Evaluation Metrics to report:                                         │
+│     - URLLC SLA Violation Ratio: % of operational time latency exceeds 15.0 ms.        │
+│     - Latency Distribution: Min, mean, median, and 99th-percentile (p99) latency.      │
+│     - eMBB Throughput & Link Utilization: Aggregate throughput over 10 Mbps bottleneck.│
+│     - Cumulative Regret & Convergence Time of SRA-LinUCB.                              │
+│     - Guardrail Safety Intervention Statistics: Count of approved, rejected, repaired.│
+│     - Security Overhead Analysis: Impact of active WireGuard encryption on SLA budget. │
+│                                                                                        │
+│  PHASE 11: Real-Time Telemetry & Monitoring Dashboard                                  │
+│  ────────────────────────────────────────────────────                                  │
+│  1. Implement dashboard/app.py (Streamlit / Dash / Web UI):                            │
+│     - Real-time strip charts for URLLC latency, queue backlog, and eMBB throughput.    │
+│     - 6D Context vector radar chart (x_0 through x_5).                                 │
+│     - Bandit action confidence bounds (UCB scores) and selected arm.                   │
+│     - Live Guardrail Safety Status Badge (APPROVED, REJECTED, REPAIRED).               │
+│     - Dynamic slice bandwidth allocation distribution gauge.                           │
+└────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-# 13. Development Environment
-
-The project is developed on **Windows using WSL2 Ubuntu**.
-
-VS Code is connected to the WSL environment.
-
-Recommended setup:
-
-```text
-Windows
-   ↓
-WSL2
-   ↓
-Ubuntu
-   ↓
-VS Code
-   ↓
-AI-Safe-Dynamic-Slicing/
-```
-
-This is important because Mininet and Open vSwitch are Linux-based tools.
-
----
-
-# 14. Opening the Project in VS Code
-
-From the WSL terminal:
-
-```bash
-cd ~/AI-Safe-Dynamic-Slicing
-code .
-```
-
-VS Code should open the project using the WSL environment.
-
-The terminal inside VS Code should show a Linux/WSL shell.
-
----
-
-# 15. Python Environment
-
-Ryu 4.34 has compatibility problems with newer Python versions, so this project uses a dedicated Python environment:
-
-```text
-Environment: ryu-3.9
-Python:      3.9.18
-Ryu:         4.34
-```
-
-Activate it:
-
-```bash
-pyenv activate ryu-3.9
-```
-
-Check:
-
-```bash
-python --version
-```
-
-Expected:
-
-```text
-Python 3.9.18
-```
-
-Check Ryu:
-
-```bash
-ryu-manager --version
-```
-
-Expected:
-
-```text
-ryu-manager 4.34
-```
-
----
-
-# 16. Required Software
-
-Install/configure the following:
-
-| Tool | Purpose |
-|---|---|
-| Python 3.9 | Ryu-compatible environment |
-| Ryu 4.34 | SDN controller |
-| Mininet 2.3.0 | Network emulation |
-| Open vSwitch 3.3.9 | SDN data plane |
-| OpenFlow 1.3 | Controller-switch communication |
-| iperf3 3.16 | Traffic generation |
-| Git | Version control |
-| VS Code | Development |
-| WSL2 Ubuntu | Linux environment |
-
-Additional Python packages can be added as the AI/telemetry modules are implemented.
-
----
-
-# 17. Verify the Installation
-
-Run:
-
-```bash
-python --version
-```
-
-```bash
-ryu-manager --version
-```
-
-```bash
-sudo mn --version
-```
-
-```bash
-sudo ovs-vsctl --version
-```
-
-```bash
-iperf3 --version
-```
-
-Expected versions used in the current setup:
-
-```text
-Python     3.9.18
-Ryu        4.34
-Mininet    2.3.0
-OVS        3.3.9
-iperf3     3.16
-```
-
----
-
-# 18. Project Structure
-
-Current/target repository structure:
+## 6. Repository File Layout
 
 ```text
 AI-Safe-Dynamic-Slicing/
+├── README.md                      # Complete system documentation & roadmap
+├── requirements.txt               # Dependencies (numpy, ryu, pytest, etc.)
 │
-├── README.md
-├── requirements.txt
+├── topology/                      # Module 01: SDN Network & Slices
+│   └── topology.py                # 2-switch, 6-host Mininet topology with 10 Mbps bottleneck
 │
-├── config/
+├── controller/                    # Module 07: SDN Control Plane
+│   └── ryu_controller.py          # Ryu OpenFlow 1.3 learning switch controller
 │
-├── topology/
-│   └── topology.py
+├── telemetry/                     # Module 02: Network Telemetry Collector
+│   ├── monitor.py                 # TelemetryRecord, namespace-aware probing, tc parsing
+│   └── test_telemetry.py          # 15 unit tests for telemetry collection
 │
-├── controller/
-│   └── ryu_controller.py
+├── ai/                            # Modules 03 & 04: AI Context & Decision Engine
+│   ├── context_builder.py         # Module 03: Telemetry-to-context 6D normalization
+│   ├── linucb.py                  # Module 04: SRA-LinUCB linear contextual bandit
+│   ├── test_context_builder.py    # 17 unit tests for context building
+│   ├── test_linucb.py             # 11 unit tests for SRA-LinUCB algorithm
+│   ├── test_integration.py        # 6 integration tests (M2 -> M3 -> M4 pipeline)
+│   └── test_pipeline_live.py      # Standalone live interactive pipeline demonstration
 │
-├── telemetry/
-│   └── monitor.py              # planned
+├── security/                      # Module 05: Security & Overhead Profiling
+│   ├── __init__.py
+│   ├── security_config.py         # SecurityState dataclass, modes, protocol defaults
+│   ├── security_metrics.py        # Pure functions for security overhead calculation
+│   └── wireguard_adapter.py       # WireGuard system adapter and simulation fallback
 │
-├── slicing/
-│   └── slice_config.py         # planned/under development
+├── guardrail/                     # Module 06: Deterministic SLA & Security Guardrail
+│   ├── __init__.py
+│   ├── sla_config.py              # GuardrailConfig dataclass (thresholds and limits)
+│   └── guardrail.py               # SLASecurityGuardrail validation and repair engine
 │
-├── ai/
-│   └── ...                     # planned
+├── tests/                         # Modules 05 & 06 Unit & Pipeline Integration Tests
+│   ├── __init__.py
+│   ├── test_security.py           # 13 unit tests for security profiling
+│   ├── test_guardrail.py          # 14 unit tests for SLA guardrail validation
+│   └── test_pipeline_guardrail.py # 7 end-to-end integration tests (M2 -> M3 -> M4 -> M6)
 │
-├── security/
-│   └── ...                     # planned
+├── data/                          # Telemetry datasets
+│   └── telemetry.csv              # Runtime telemetry log generated by monitor.py
 │
-├── guardrail/
-│   └── ...                     # planned
-│
-├── experiments/
-│   └── ...                     # planned
-│
-├── data/
-│   └── telemetry.csv           # generated later
-│
-└── results/
-    └── ...                     # generated later
+└── results/                       # Experimental evaluation results and plots
 ```
-
-Do not assume a module is complete just because its folder exists. The current implemented core is the topology and Ryu controller; the remaining modules will be developed incrementally.
 
 ---
 
-# 19. Running the Current System
+## 7. Setup & Execution Instructions
 
-## Terminal 1 — Start Ryu
+### Environment Prerequisites
 
-Activate the environment:
+The project runs on **Windows with WSL2 Ubuntu 22.04 LTS**.
 
+| Tool | Version | Purpose |
+|---|---|---|
+| **Python** | 3.9 (Ryu controller) / 3.10, 3.11 (AI & Tests) | Execution environments |
+| **Ryu** | 4.34 | SDN OpenFlow 1.3 controller |
+| **Mininet** | 2.3.0 | Network data plane emulation |
+| **Open vSwitch** | 3.3.9 | Virtual SDN switching |
+| **iperf3** | 3.16 | Traffic generation & throughput testing |
+
+### Running the Test Suite (83 Tests)
+
+Run the entire automated regression suite from the project root:
+
+```bash
+# Run all 83 tests in quiet mode
+pytest -q
+
+# Run with per-test details
+pytest -v
+```
+
+### Running the Live Pipeline Demo
+
+To execute the M2 $\rightarrow$ M3 $\rightarrow$ M4 pipeline processing simulated network state steps:
+
+```bash
+python ai/test_pipeline_live.py
+```
+
+### Running the Live SDN Testbed (WSL2)
+
+#### Terminal 1: Start Ryu Controller
 ```bash
 pyenv activate ryu-3.9
-```
-
-From the project directory:
-
-```bash
 cd ~/AI-Safe-Dynamic-Slicing
-```
-
-Start the controller:
-
-```bash
 ryu-manager controller/ryu_controller.py
 ```
 
-Keep this terminal running.
-
----
-
-## Terminal 2 — Start Mininet
-
-Open another WSL terminal.
-
-Activate the environment:
-
+#### Terminal 2: Start Mininet Network
 ```bash
 pyenv activate ryu-3.9
-```
-
-Go to the project:
-
-```bash
 cd ~/AI-Safe-Dynamic-Slicing
-```
-
-Clean old Mininet state if required:
-
-```bash
-sudo mn -c
-```
-
-Start the topology:
-
-```bash
+sudo mn -c   # Clean up residual OVS state
 sudo "$(pyenv which python)" topology/topology.py
 ```
 
-You should reach:
-
-```text
-mininet>
-```
-
----
-
-# 20. Basic Network Test
-
-At the Mininet prompt:
-
+#### Terminal 3: Generate Traffic in Mininet
 ```bash
-pingall
+# Verify connectivity
+mininet> pingall
+
+# Run eMBB background traffic (H2 -> H5)
+mininet> h5 iperf3 -s -D
+mininet> h2 iperf3 -c 10.0.0.5 -t 30 -b 9M &
+
+# Monitor URLLC latency (H1 -> H4)
+mininet> h4 iperf3 -s -D
+mininet> h1 ping -i 0.2 -c 50 h4
 ```
-
-Expected:
-
-```text
-0% dropped
-```
-
-Test individual traffic classes:
-
-```bash
-h1 ping -c 3 h4
-```
-
-```bash
-h2 ping -c 3 h5
-```
-
-```bash
-h3 ping -c 3 h6
-```
-
----
-
-# 21. eMBB Throughput Test
-
-Start the server:
-
-```bash
-h5 iperf3 -s -D
-```
-
-Run the eMBB client:
-
-```bash
-h2 iperf3 -c 10.0.0.5 -t 20 -b 9M
-```
-
-The current bottleneck should allow approximately 9 Mbps.
-
----
-
-# 22. URLLC + eMBB Congestion Test
-
-Start the URLLC server:
-
-```bash
-h4 iperf3 -s -D
-```
-
-Start URLLC ping:
-
-```bash
-h1 ping -i 0.1 -c 200 h4 &
-```
-
-Then, as a separate Mininet command, start eMBB traffic:
-
-```bash
-h2 iperf3 -c 10.0.0.5 -t 20 -b 9M
-```
-
-This creates the controlled congestion experiment.
-
----
-
-# 23. Important Mininet Cleanup
-
-If Mininet reports errors such as:
-
-```text
-RTNETLINK answers: File exists
-```
-
-exit/stop the current Mininet session and run from the normal WSL terminal:
-
-```bash
-sudo mn -c
-```
-
-Then start the topology again.
-
-Do not run `sudo mn -c` inside the `mininet>` prompt.
-
----
-
-# 24. Team Development Rule
-
-Before modifying another person's module:
-
-1. Pull the latest code.
-2. Understand the module interface.
-3. Do not overwrite working code unnecessarily.
-4. Keep module inputs/outputs clearly defined.
-5. Commit changes with meaningful messages.
-6. Test the module before pushing.
-
-Example:
-
-```bash
-git pull
-```
-
-```bash
-git add .
-```
-
-```bash
-git commit -m "Implement telemetry collection"
-```
-
-```bash
-git push
-```
-
----
-
-# 25. Overall Development Roadmap
-
-```text
-PHASE 1
-SDN Network + Slicing
-        ↓
-PHASE 2
-Ryu SDN Control
-        ↓
-PHASE 3
-Network Telemetry
-        ↓
-PHASE 4
-Context / Feature Extraction
-        ↓
-PHASE 5
-SRA-LinUCB AI
-        ↓
-PHASE 6
-SLA & Security Guardrail
-        ↓
-PHASE 7
-Security Integration
-        ↓
-PHASE 8
-Feedback & Learning
-        ↓
-PHASE 9
-Static vs Dynamic vs Safe Dynamic
-        ↓
-PHASE 10
-Graphs / Analysis / Dashboard
-        ↓
-FINAL SYSTEM
-```
-
----
-
-# 26. What Has Been Proven So Far
-
-The current implementation has already demonstrated:
-
-```text
-Windows + WSL2
-      ↓
-Mininet
-      ↓
-OVS
-      ↓
-OpenFlow 1.3
-      ↓
-Ryu Controller
-      ↓
-Three Traffic Classes
-      ↓
-10 Mbps Bottleneck
-      ↓
-eMBB Traffic
-      ↓
-URLLC Traffic
-      ↓
-Congestion
-      ↓
-Significant URLLC Latency Increase
-```
-
-This is the **baseline foundation** for the AI-driven safe dynamic network slicing system.
-
-The next development stage is to replace manual observation with an automated telemetry pipeline and then connect that telemetry to the SRA-LinUCB decision and safety layers.
