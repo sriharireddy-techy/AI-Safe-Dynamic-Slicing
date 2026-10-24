@@ -35,7 +35,7 @@ The system establishes an architectural boundary between optimization and safety
                                           ▼
                ┌────────────────────────────────────────────────────────┐
                │           Module 02: Network Telemetry Collector       │
-               │  - Active RTT/Loss via mnexec inside host namespaces    │
+               │  - Active RTT/Loss via mnexec inside host namespaces   │
                │  - Passive /sys/class/net interface byte counters      │
                │  - Linux Traffic Control (tc) egress queue backlog     │
                └──────────────────────────┬─────────────────────────────┘
@@ -58,8 +58,8 @@ The system establishes an architectural boundary between optimization and safety
                                           │ Candidate Action (0, 1, or 2)
                                           ▼
                ┌────────────────────────────────────────────────────────┐
-               │      Module 06: Deterministic SLA & Security Guardrail │
                │  - Module 05 Security State & WireGuard Profile        │
+               │  - Module 06: Deterministic SLA & Security Guardrail │
                │  - Hard Capacity Limit: sum(BW) <= 10.0 Mbps           │
                │  - URLLC Latency Gate: latency <= 15.0 ms              │
                │  - Loss Gate: loss <= 1.0% | Risk Gate: risk <= 0.7    │
