@@ -1,111 +1,136 @@
 # AI-Driven Safe Dynamic Network Slicing for SLA-Preserving SDN Networks
 
-[![Tests](https://img.shields.io/badge/Tests-114%20Passed-brightgreen)](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/tests)
-[![Python](https://img.shields.io/badge/Python-3.9%20%7C%203.10%20%7C%203.11-blue)](https://www.python.org/)
-[![SDN](https://img.shields.io/badge/SDN-Ryu%204.34%20%2B%20OpenFlow%201.3-orange)](https://ryu-sdn.org/)
-[![Data Plane](https://img.shields.io/badge/Data%20Plane-Mininet%20%2B%20Open%20vSwitch-lightgrey)](http://mininet.org/)
-[![Modules](https://img.shields.io/badge/Modules-1%20to%209%20Integrated-success)](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing)
+[![Tests](https://img.shields.io/badge/Tests-154%20Passed%20(100%25)-brightgreen?style=for-the-badge&logo=pytest)](tests/)
+[![Python](https://img.shields.io/badge/Python-3.9%20%7C%203.10%20%7C%203.11-blue?style=for-the-badge&logo=python)](https://www.python.org/)
+[![SDN Controller](https://img.shields.io/badge/SDN-Ryu%204.34%20%2B%20OpenFlow%201.3-orange?style=for-the-badge)](https://ryu-sdn.org/)
+[![Data Plane](https://img.shields.io/badge/Data%20Plane-Mininet%20%2B%20Open%20vSwitch-lightgrey?style=for-the-badge)](http://mininet.org/)
+[![Dashboard](https://img.shields.io/badge/Dashboard-Streamlit%201.30%2B-red?style=for-the-badge&logo=streamlit)](http://localhost:8501)
+[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 
 ---
 
-## 1. Project Overview & Architecture
+## 1. Executive Summary & Abstract
 
-This project implements an **AI-driven, safety-constrained dynamic network slicing system** for Software-Defined Networks (SDN).
+Next-generation multi-tenant Software-Defined Networks (SDN) in 5G and 6G architectures must simultaneously host heterogeneous service classes over shared physical infrastructure:
+- **Ultra-Reliable Low-Latency Communication (URLLC):** Mission-critical services (autonomous vehicles, telesurgery, industrial robotics) requiring round-trip latency $\le 15.0\text{ ms}$ and packet loss $\le 1.0\%$.
+- **Enhanced Mobile Broadband (eMBB):** Bandwidth-intensive applications (4K/8K video streaming, AR/VR) seeking maximum throughput.
+- **Best-Effort (BE):** Standard elastic background traffic (email, web browsing).
 
-In shared multi-tenant 5G/6G networks, bandwidth-hungry applications (such as enhanced Mobile Broadband / eMBB 4K video) compete for bottleneck link capacity against mission-critical, low-latency traffic (such as Ultra-Reliable Low-Latency Communication / URLLC for autonomous vehicles, industrial robotics, and healthcare). Unregulated bandwidth competition leads to bufferbloat, queuing delay spikes, and packet drops that breach Service Level Agreements (SLAs).
+### The Shared Link Bottleneck Problem
+When high-bandwidth eMBB traffic surges on a shared bottleneck link (10.0 Mbps link between switches `s1` and `s2`), eMBB packets flood the egress switch buffer (**bufferbloat**). Under First-In-First-Out (FIFO) queue processing, URLLC packets arrive and are forced to queue behind bulk eMBB frames. This causes URLLC latency to spike from a nominal **$10.15\text{ ms}$ baseline to over $30\text{--}120\text{ ms}$**, resulting in catastrophic Service Level Agreement (SLA) violations.
+
+### Why Pure AI is Dangerous for Network Control
+Conventional static network slicing rigidly partitions bandwidth (e.g., locking URLLC to 3 Mbps and eMBB to 5 Mbps). This guarantees isolation but causes severe resource underutilization: when URLLC is idle, up to 70% of its reserved bandwidth is wasted while competing eMBB flows drop packets.
+
+Conversely, unconstrained Reinforcement Learning (RL) or Contextual Bandits learn through stochastic exploration (trial-and-error). During exploration, pure AI models routinely allocate excessive bandwidth to eMBB to maximize reward, inadvertently causing the very congestion and bufferbloat that breaches mission-critical SLAs.
 
 ### Core Architectural Principle
-
 > **"Let AI optimize the network, but never let AI optimize at the cost of a critical SLA."**
 
-The system establishes an architectural boundary between optimization and safety:
-- **Optimization Layer (AI):** A Security- and Risk-Aware Linear Upper Confidence Bound ([`SRALinUCB`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/ai/linucb.py)) contextual bandit explores and optimizes resource allocations.
-- **Safety Layer (Guardrail):** An independent deterministic verifier ([`SLASecurityGuardrail`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/guardrail/guardrail.py)) intercepts candidate actions and enforces hard physical capacity, latency, loss, and security constraints *before* any flow modifications reach the data plane.
-- **Feedback & Learning Layer:** A closed-loop reward engine and causal learner ([`feedback/`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/feedback)) updates bandit parameters strictly based on actual executed allocations, with safe feedback attribution for repaired and rejected actions.
+This project introduces a **two-tier defense-in-depth architecture**:
+1. **Optimization Layer (AI):** A Security- and Risk-Aware Linear Upper Confidence Bound (**SRA-LinUCB**) contextual bandit dynamically optimizes slice bandwidth allocations from real-time physical telemetry while penalizing risky actions during network stress.
+2. **Safety Layer (Deterministic Guardrail):** An independent mathematical gatekeeper (**SLASecurityGuardrail**) intercepts candidate allocations *before* they are sent to the data plane. It enforces 6 hard physical and operational gates (Capacity, URLLC Floor, Latency, Loss, Security Risk, Crypto Delay) and features an atomic **Deterministic Repair Engine** that safely scales down lower-priority slices while locking URLLC at its guaranteed reservation.
+3. **Data-Plane Actuator (Phase 10):** Translates approved allocations into Linux Traffic Control (`tc`) Hierarchical Token Bucket (HTB) rate classes on Open vSwitch interfaces with kernel read-back verification and atomic rollback to a known-safe baseline.
+4. **Interactive Web Dashboard (Phase 11):** A real-time Streamlit visualization suite allowing full auditability, live slider-based AI simulation, and comparative benchmark inspection.
 
-### Complete System Architecture
+---
+
+## 2. End-to-End System Architecture (Strict Module 01 to 11 Flow)
+
+The system is organized into a clean, sequential pipeline where every module from **Module 01 to Module 11** operates in strict, ordered succession:
 
 ```text
-               ┌────────────────────────────────────────────────────────┐
-               │              Physical / Emulated Data Plane            │
-               │   Mininet 2.3.0 + Open vSwitch (OVS 3.3.9) Switches    │
-               │   [H1..H3] ─── S1 ════(10 Mbps Bottleneck)════ S2 ─── [H4..H6] │
-               └──────────────────────────┬─────────────────────────────┘
-                                          │ Active Probes & Queue Stats
-                                          ▼
-               ┌────────────────────────────────────────────────────────┐
-               │           Module 02: Network Telemetry Collector       │
-               │  - Active RTT/Loss via mnexec inside host namespaces   │
-               │  - Passive /sys/class/net interface byte counters      │
-               │  - Linux Traffic Control (tc) egress queue backlog     │
-               └──────────────────────────┬─────────────────────────────┘
-                                          │ TelemetryRecord (Raw stats)
-                                          ▼
-               ┌────────────────────────────────────────────────────────┐
-               │         Module 03: Context & Feature Extraction        │
-               │  - Defensive sentinel sanitization (-1.0 ms -> worst)  │
-               │  - Dynamic temporal trend extraction (lat_t - lat_prev)│
-               │  - Normalization to [0.0, 1.0] -> 6D Vector x_t in R^6 │
-               └──────────────────────────┬─────────────────────────────┘
-                                          │ Context Vector x_t
-                                          ▼
-               ┌────────────────────────────────────────────────────────┐
-               │             Module 04: SRA-LinUCB Decision Engine      │
-               │  - Multi-armed contextual bandit (d=6, K=3)            │
-               │  - Ridge regression via np.linalg.solve()              │
-               │  - Risk-penalized score: UCB_a - lambda * rho_a * R(x) │
-               └──────────────────────────┬─────────────────────────────┘
-                                          │ Candidate Action (0, 1, or 2)
-                                          ▼
-               ┌────────────────────────────────────────────────────────┐
-               │  - Module 05 Security State & WireGuard Profile        │
-               │  - Module 06: Deterministic SLA & Security Guardrail │
-               │  - Hard Capacity Limit: sum(BW) <= 10.0 Mbps           │
-               │  - URLLC Latency Gate: latency <= 15.0 ms              │
-               │  - Loss Gate: loss <= 1.0% | Risk Gate: risk <= 0.7    │
-               └──────────────┬──────────────────────────┬──────────────┘
-                              │ SAFE                     │ UNSAFE
-                              ▼                          ▼
-               ┌────────────────────────┐  ┌────────────────────────────┐
-               │   Approved Action      │  │ REJECT or DETERMINISTIC    │
-               │   Forwarded to SDN     │  │ REPAIR to Safe Allocation  │
-               └──────────────┬─────────┘  └─────────────┬──────────────┘
-                              │                          │
-                              └───────────┬──────────────┘
-                                          │ Executed Safe Allocation
-                                          ▼
-               ┌────────────────────────────────────────────────────────┐
-               │             Module 07: Ryu OpenFlow 1.3 Controller     │
-               │  - Dynamic meter & queue slice reconfiguration         │
-               │  - MAC-learning L2 forwarding on TCP port 6633         │
-               └──────────────────────────┬─────────────────────────────┘
-                                          │ Post-Enforcement Telemetry
-                                          ▼
-               ┌────────────────────────────────────────────────────────┐
-               │        Module 08: Feedback & Online Learning Engine    │
-               │  - Multi-Objective Reward: TPut, Latency, Loss, SLA    │
-               │  - Quadratic Barrier Penalty for SLA Violations        │
-               │  - Causal Safe Attribution: Updates executed arms only │
-               └──────────────────────────┬─────────────────────────────┘
-                                          │ Model Update: A_a, b_a
-                                          └───────► (Back to Module 04)
+===================================================================================================
+               STRICT MODULE-BY-MODULE SYSTEM ARCHITECTURE (MODULES 01 TO 11)
+===================================================================================================
+
+ ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+ │ MODULE 01: Physical / Emulated Slicing Topology (topology/topology.py)                         │
+ │ - Mininet 2.3 + Open vSwitch (OVS 3.3) switches (S1, S2) and 6 hosts (H1..H6)                 │
+ │ - 10.0 Mbps Physical Bottleneck Link (s1-eth4 <-> s2-eth4) with 5.0 ms One-Way Delay           │
+ │ - Logical Slices: URLLC (H1<->H4, >=3M floor) | eMBB (H2<->H5, elastic) | Best Effort (H3<->H6)│
+ └──────────────────────────────────────────────┬────────────────────────────────────────────────┘
+                                                │ Physical Packets, Interface Bytes & Queue Backlog
+                                                ▼
+ ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+ │ MODULE 02: Network Telemetry Collector (telemetry/monitor.py)                                 │
+ │ - Active namespace-aware probing via mnexec (measures URLLC round-trip latency & packet loss) │
+ │ - Passive interface statistics from /sys/class/net & Linux tc egress queue buffer occupancy   │
+ └──────────────────────────────────────────────┬────────────────────────────────────────────────┘
+                                                │ Raw TelemetryRecord
+                                                ▼
+ ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+ │ MODULE 03: Context & Feature Extraction (ai/context_builder.py)                               │
+ │ - Sanitizes telemetry (translates -1.0 ms drops into 1.0 worst-case)                          │
+ │ - Normalizes metrics into a 6D mathematical vector x_t in R^6:                                │
+ │   x0: Bias (1.0) | x1: Latency | x2: Throughput | x3: Queue | x4: Trend Velocity | x5: Loss   │
+ └──────────────────────────────────────────────┬────────────────────────────────────────────────┘
+                                                │ 6D Normalized Context Vector x_t
+                                                ▼
+ ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+ │ MODULE 04: SRA-LinUCB Decision Engine (ai/linucb.py)                                          │
+ │ - Multi-armed contextual bandit evaluating 3 actions: DECREASE_EMBB, MAINTAIN, INCREASE_EMBB  │
+ │ - Incorporates proactive risk penalty: Score_a(x_t) = UCB_a(x_t) - lambda * rho_a * R(x_t)   │
+ └──────────────────────────────────────────────┬────────────────────────────────────────────────┘
+                                                │ Candidate Action Proposal
+                                                ▼
+ ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+ │ MODULE 05: Security State & Overhead Profiler (security/security_config.py)                   │
+ │ - Profiles WireGuard cryptographic tunnel latency overhead (empirical 1.2 ms delay)          │
+ │ - Passes encryption budget to Guardrail so security delay is accounted for before switch      │
+ └──────────────────────────────────────────────┬────────────────────────────────────────────────┘
+                                                │ Candidate Action + Security Budget
+                                                ▼
+ ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+ │ MODULE 06: Deterministic SLA & Security Guardrail (guardrail/guardrail.py)                    │
+ │ - Pre-execution mathematical gatekeeper enforcing 6 hard safety gates                         │
+ │ - If candidate violates capacity (>10M) or URLLC floor (<3M):                                 │
+ │   Triggers Deterministic Repair: Locks URLLC = 3.0M, Protects BE = 0.5M, Caps eMBB = 6.5M     │
+ └──────────────────────────────────────────────┬────────────────────────────────────────────────┘
+                                                │ Verified & Safe Allocation
+                                                ▼
+ ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+ │ MODULE 07: Ryu OpenFlow 1.3 SDN Controller (controller/ryu_controller.py)                     │
+ │ - Pushes OpenFlow 1.3 flow modification messages (OFPFlowMod) to Open vSwitch switches        │
+ │ - Implements layer-2 MAC address learning and maps slice flows to designated queue IDs        │
+ └──────────────────────────────────────────────┬────────────────────────────────────────────────┘
+                                                │ Post-Enforcement Network Consequences
+                                                ▼
+ ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+ │ MODULE 08: Closed-Loop Reward Engine & Feedback Learner (feedback/)                           │
+ │ - Computes multi-objective reward with steep quadratic barrier penalty for SLA violations     │
+ │ - Causal Safe Attribution: Updates LinUCB covariance matrices (A_a, b_a) in Module 04        │
+ └──────────────────────────────────────────────┬────────────────────────────────────────────────┘
+                                                │ Validated Closed-Loop System
+                                                ▼
+ ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+ │ MODULE 09: Trace-Driven Simulation Benchmark Evaluation (experiments/)                        │
+ │ - First-principles fluid FIFO queuing simulation model under standardized 20-step trace       │
+ │ - Scientific 3-way evaluation: Static Slicing vs Unsafe LinUCB vs Proposed AI-Safe System     │
+ │ - Generates 24-column CSVs, summary tables, and publication plots (comparison, latency, tput) │
+ └──────────────────────────────────────────────┬────────────────────────────────────────────────┘
+                                                │ Actuation Commands & Read-Back Verification
+                                                ▼
+ ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+ │ MODULE 10: Dynamic Data-Plane Rate Actuator (controller/slicing_actuator.py)                  │
+ │ - Enforces approved rates via Linux tc HTB classes (1:10 URLLC, 1:20 eMBB, 1:30 Best-Effort)  │
+ │ - Reads back kernel state via /sbin/tc class show; auto-rolls back to safe baseline on failure│
+ └──────────────────────────────────────────────┬────────────────────────────────────────────────┘
+                                                │ Unified System State & Visual Analytics
+                                                ▼
+ ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+ │ MODULE 11: Real-Time Interactive Web Dashboard (dashboard/app.py on http://localhost:8501)    │
+ │ - Interactive Streamlit UI presenting all 6 operational views to the user and examiner:       │
+ │   1. Topology Overview      2. Live Telemetry vs SLA  3. AI Simulator & 6D Context            │
+ │   4. Guardrail Sandbox      5. Benchmark Plots        6. Data-Plane Actuator Verification     │
+ └───────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 2. Network Topology & Slicing Specifications
+## 3. Network Topology & Slicing Specifications
 
-Implemented in [`topology/topology.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/topology/topology.py) using Mininet, Open vSwitch, and Linux Traffic Control (`tc`).
-
-### Logical Slices & Service Level Agreements
-
-| Slice | Host Pair | Traffic Profile | Service Level Agreement (SLA) | Initial Share |
-|---|---|---|---|:---:|
-| **URLLC** | Host `H1` $\leftrightarrow$ Host `H4` | Ultra-Reliable Low-Latency | Latency $\le 15.0\text{ ms}$, Loss $\le 1.0\%$, Min Bandwidth $\ge 3.0\text{ Mbps}$ | $3.0\text{ Mbps}$ |
-| **eMBB** | Host `H2` $\leftrightarrow$ Host `H5` | High-Throughput Video/Bulk | High throughput up to remaining link budget | $5.0\text{ Mbps}$ |
-| **Best Effort (BE)** | Host `H3` $\leftrightarrow$ Host `H6` | Background Elastic Traffic | Elastic best-effort background communication | $2.0\text{ Mbps}$ |
-
-### Physical Bottleneck Configuration
+Implemented in [`topology/topology.py`](topology/topology.py) using Mininet, Open vSwitch, and Linux Traffic Control (`tc`).
 
 ```text
    H1 (URLLC Source) ────┐                                ┌──── H4 (URLLC Sink)
@@ -115,377 +140,388 @@ Implemented in [`topology/topology.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/
                               Delay: 5 ms, Buffer: 50 pkts
 ```
 
-- **Switches:** Two Open vSwitch bridges (`S1`, `S2`) connected via OpenFlow 1.3 to the Ryu controller.
-- **Bottleneck Link:** The inter-switch link (`s1-eth4` $\leftrightarrow$ `s2-eth4`) is constrained to **10.0 Mbps** bandwidth with a **5.0 ms propagation delay** (minimum round-trip time $RTT_{\text{base}} \approx 10.15\text{ ms}$) and an egress buffer limit of **50 packets**.
+### Logical Slices & Service Level Agreements (SLAs)
 
-### Empirical Congestion Baseline (The Starvation Problem)
+| Slice | Endpoints | Traffic Type | Queue / HTB | Priority | Guaranteed Floor | SLA Latency Ceiling | SLA Loss Limit |
+|---|:---:|---|:---:|:---:|:---:|:---:|:---:|
+| **URLLC** | `h1` $\leftrightarrow$ `h4` | Mission-Critical Low Latency | Queue 0 / `1:10` | 0 (Highest) | **$\ge 3.0\text{ Mbps}$** | **$\le 15.0\text{ ms}$** | **$\le 1.0\%$** |
+| **eMBB** | `h2` $\leftrightarrow$ `h5` | High-Throughput Bulk Video | Queue 1 / `1:20` | 1 (Medium) | $\ge 1.0\text{ Mbps}$ | Elastic | Elastic |
+| **Best Effort (BE)** | `h3` $\leftrightarrow$ `h6` | Background Elastic Traffic | Queue 2 / `1:30` | 2 (Lowest) | $\ge 0.5\text{ Mbps}$ | Elastic | Elastic |
 
-Controlled network experiments demonstrate why static or unprotected networks fail:
-1. **Idle / URLLC Alone:** Average latency is **10.15 ms** with **0.0% packet loss** (well within the 15.0 ms SLA).
-2. **Unregulated eMBB Burst (9.0 Mbps via iperf3):**
-   - Average URLLC latency surges to **29.88 ms**.
-   - Maximum observed latency spikes to **122.44 ms**.
-   - The 15.0 ms SLA threshold is heavily violated, starving mission-critical traffic.
-
----
-
-## 3. Implemented Modules & Technical Formulations
-
-### Module 01: SDN Network & Slicing Topology
-- **File:** [`topology/topology.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/topology/topology.py)
-- Builds the 2-switch, 6-host Mininet topology. Configures per-interface bandwidth, propagation delay, and buffer sizes using Linux HTB qdiscs.
-
-### Module 07: SDN Control Plane
-- **File:** [`controller/ryu_controller.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/controller/ryu_controller.py)
-- Asynchronous Ryu OpenFlow 1.3 MAC-learning switch controller listening on TCP port 6633. Dynamically installs bidirectional flow rules, achieving **0% packet loss** during `pingall`.
-
-### Module 02: Network Telemetry Collector
-- **File:** [`telemetry/monitor.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/telemetry/monitor.py)
-- **Key Class:** [`TelemetryRecord`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/telemetry/monitor.py#L29) dataclass.
-- **Capabilities:**
-  1. *Active Probing:* Runs `mnexec -a <H1_PID> ping -c <count> -i 0.2 <H4_IP>` directly inside host `H1`'s isolated network namespace.
-  2. *Passive Interface Monitoring:* Reads bytes from `/sys/class/net/s1-eth4/statistics/`.
-  3. *Queue Backlog Monitoring:* Parses `tc -s qdisc show dev s1-eth4` to extract current packet queue depth.
-  4. *Defensive Sentinel:* Returns `-1.0 ms` latency and `100.0%` loss on dropped probes without crashing.
-  5. *Persistence:* Thread-safe CSV logging to `data/telemetry.csv`.
-
-### Module 03: Context & Feature Extraction
-- **File:** [`ai/context_builder.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/ai/context_builder.py)
-- **Key Class:** [`ContextBuilder`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/ai/context_builder.py#L31)
-- **Mathematical Transformation:** Maps raw telemetry into a bounded 6D context vector $\mathbf{x}_t \in \mathbb{R}^6$:
-
-$$\mathbf{x}_t = \begin{bmatrix}
-x_0 \\
-x_1 \\
-x_2 \\
-x_3 \\
-x_4 \\
-x_5
-\end{bmatrix} = \begin{bmatrix}
-1.0 & \text{(Bias / Intercept)} \\
-\min\left(1.0, \frac{\text{URLLC Latency (ms)}}{50.0}\right) & \text{(Normalized Latency)} \\
-\min\left(1.0, \frac{\text{Throughput (Mbps)}}{10.0}\right) & \text{(Normalized Bottleneck Rate)} \\
-\min\left(1.0, \frac{\text{Queue Backlog (pkts)}}{50.0}\right) & \text{(Normalized Buffer Depth)} \\
-\text{clip}\left(\frac{\text{Latency}_t - \text{Latency}_{t-1}}{10.0}, -1.0, 1.0\right) & \text{(Temporal Latency Velocity)} \\
-\frac{\text{Packet Loss (\%)}}{100.0} & \text{(Normalized Packet Loss Ratio)}
-\end{bmatrix}$$
-
-### Module 04: SRA-LinUCB Decision Engine
-- **File:** [`ai/linucb.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/ai/linucb.py)
-- **Key Class:** [`SRALinUCB`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/ai/linucb.py#L59)
-- **Action Space ($K=3$):**
-  - Action `0`: `DECREASE_EMBB` (Throttles eMBB; de-congesting risk profile $\rho_0 = -1.0$)
-  - Action `1`: `MAINTAIN` (Holds steady; neutral risk profile $\rho_1 = 0.0$)
-  - Action `2`: `INCREASE_EMBB` (Expands eMBB; congestion risk profile $\rho_2 = +1.0$)
-- **Mathematical Formulations:**
-  - Online Ridge Regression Precision Matrix:
-    $$\mathbf{A}_a = \mathbf{I}_6 + \sum_{\tau=1}^t \mathbf{x}_\tau \mathbf{x}_\tau^T \in \mathbb{R}^{6 \times 6}$$
-  - Reward-Weighted Context Accumulator:
-    $$\mathbf{b}_a = \sum_{\tau=1}^t r_\tau \mathbf{x}_\tau \in \mathbb{R}^6$$
-  - Weight estimate $\hat{\boldsymbol{\theta}}_a$ computed via numerically stable `np.linalg.solve(A_a, b_a)`.
-  - Context Risk Indicator:
-    $$R(\mathbf{x}_t) = 0.4 x_1 + 0.3 x_3 + 0.2 \max(0, x_4) + 0.1 x_5$$
-  - SRA Action Selection Score:
-    $$\text{Score}_a(\mathbf{x}_t) = \mathbf{x}_t^T \hat{\boldsymbol{\theta}}_a + \alpha \sqrt{\mathbf{x}_t^T \mathbf{A}_a^{-1} \mathbf{x}_t} - \lambda \rho_a R(\mathbf{x}_t)$$
-  - Candidate Action:
-    $$a^* = \arg\max_{a \in \{0, 1, 2\}} \text{Score}_a(\mathbf{x}_t)$$
-
-### Module 05: Security & Overhead Profiling
-- **Files:** [`security/security_config.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/security/security_config.py), [`security/security_metrics.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/security/security_metrics.py), [`security/wireguard_adapter.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/security/wireguard_adapter.py)
-- **Key Classes:** [`SecurityState`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/security/security_config.py#L37), [`SecurityMetrics`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/security/security_metrics.py#L12), [`WireGuardAdapter`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/security/wireguard_adapter.py#L13).
-- Models crypto tunnel delay ($\Delta_{\text{crypto}} \approx 1.2\text{ ms}$), throughput penalty, and threat levels. Distinguishes live empirical measurements (`is_measured=True`) from simulation defaults.
-
-### Module 06: Deterministic SLA & Security Guardrail
-- **Files:** [`guardrail/guardrail.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/guardrail/guardrail.py), [`guardrail/sla_config.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/guardrail/sla_config.py)
-- **Key Class:** [`SLASecurityGuardrail`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/guardrail/guardrail.py#L35)
-- **Six Immutable Operational Gates:**
-  1. Total Link Capacity Gate: $\sum \text{Bandwidth}_{\text{slices}} \le 10.0\text{ Mbps}$
-  2. URLLC Guaranteed Reservation Gate: $\text{Bandwidth}_{\text{URLLC}} \ge 3.0\text{ Mbps}$
-  3. URLLC Latency SLA Gate: Measured latency $\le 15.0\text{ ms}$
-  4. Packet Loss Gate: Drop rate $\le 1.0\%$
-  5. Security Threat Gate: Risk score $\le 0.70$
-  6. Crypto Overhead Gate: Added crypto delay $\le 5.0\text{ ms}$
-- **Deterministic Repair Mechanism:** Over-allocated requests (e.g. $13.0\text{ Mbps} > 10.0\text{ Mbps}$) are automatically repaired by locking URLLC at its guaranteed reservation ($\ge 3.0\text{ Mbps}$), preserving a Best-Effort baseline, and scaling eMBB to exactly fill the remaining link budget ($6.5\text{ Mbps}$), preventing packet drops without terminating flows.
-
-### Module 08: Closed-Loop Reward Engine & Feedback Learner
-- **Files:** [`feedback/reward.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/feedback/reward.py), [`feedback/learner.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/feedback/learner.py), [`feedback/__init__.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/feedback/__init__.py)
-- **Key Classes:** [`RewardEngine`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/feedback/reward.py#L22), [`FeedbackLearner`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/feedback/learner.py#L28).
-- **Multi-Objective Reward Function:**
-  $$r_t = w_{\text{tput}} \cdot \tilde{T}_t - w_{\text{lat}} \cdot \tilde{L}_t - w_{\text{loss}} \cdot \tilde{P}_t - \text{Penalty}_{\text{SLA}}(t) - w_{\text{sec}} \cdot \tilde{S}_t$$
-  - Normalized Throughput ($w_{\text{tput}} = 1.0$): $\tilde{T}_t = \min\left(1.0, \frac{\text{Throughput}}{10.0}\right)$
-  - Operational Latency ($w_{\text{lat}} = 1.0$): $\tilde{L}_t = \min\left(1.0, \frac{\text{Latency}}{15.0}\right)$
-  - Packet Loss ($w_{\text{loss}} = 2.0$): $\tilde{P}_t = \frac{\text{Loss \%}}{100.0}$
-  - Security Overhead ($w_{\text{sec}} = 0.5$): Included strictly when `is_measured=True`.
-- **Quadratic Barrier SLA Penalty:**
-  $$\text{Penalty}_{\text{SLA}}(t) = \beta \cdot \max(0, \text{Latency}_{\text{ms}} - 15.0)^2, \quad \beta = 5.0$$
-- **Causal Safe Attribution Policy:**
-  - *Approved Actions:* Model updates $\mathbf{A}_a$ and $\mathbf{b}_a$ for the executed arm $a \in \{0, 1, 2\}$.
-  - *Rejected Actions:* The model is **not updated** for the candidate arm, preventing false negative credit assignment.
-  - *Repaired Actions:* Checked against discrete arms; unmapped repaired continuous allocations are logged without distorting bandit matrices.
-
-### Module 09: Evaluation & Comparative Benchmarking
-- **Files:** [`experiments/static_baseline.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/experiments/static_baseline.py), [`experiments/dynamic_baseline.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/experiments/dynamic_baseline.py), [`experiments/proposed_system.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/experiments/proposed_system.py), [`experiments/run_experiments.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/experiments/run_experiments.py)
-- **First-Principles FIFO Queuing Simulation Model:**
-  - Bottleneck Capacity: $C = 10.0\text{ Mbps}$, MTU packet size $P = 1500\text{ bytes} = 12,000\text{ bits}$.
-  - Packet transmission delay: $t_{\text{tx}} = \frac{12,000}{10.0 \times 10^6} = 1.20\text{ ms/packet}$.
-  - Queue dynamics: $\Delta Q = \frac{(\text{Aggregate Load} - C) \times 10^6 \times \Delta t}{12,000}$
-  - Buffer limit: $50\text{ packets}$ ($60\text{ ms}$ max queuing delay before tail drop).
-  - Simulated Latency: $RTT_{\text{sim}}(t) = RTT_{\text{base}} + (Q(t) \times 1.20\text{ ms}) + \Delta_{\text{crypto}}$.
-- **Standardized 24-Column CSV Schema:** Full accounting of URLLC, eMBB, and Best-Effort offered rates, allocations, throughputs, drops, queue depth, simulated RTT, and decisions.
+* **Physical Bottleneck:** The inter-switch link (`s1-eth4` $\leftrightarrow$ `s2-eth4`) is constrained to **10.0 Mbps** with a **5.0 ms propagation delay** each way.
+* **Theoretical Physical RTT Baseline:** $2 \times 5.0\text{ ms} = 10.0\text{ ms}$ ($10.15\text{ ms}$ with OVS switching delay).
+* **Buffer Capacity:** Egress queue limit is clamped to **50 packets** to prevent bufferbloat.
 
 ---
 
-## 4. Benchmark Performance Results
+## 4. Complete Phase & Module Breakdown (Phases 01 to 12)
 
-All summary metrics are calculated strictly from the generated 20-step experimental CSV files:
+> **Architectural Note on Phase Numbering vs. Runtime Pipeline Order:**  
+> - **Chronological Phases (01 to 12):** Represent the sequential engineering and verification roadmap of the project.  
+> - **Runtime Dataflow Execution Order:** When the network operates, data flows in closed-loop order: Telemetry (Phase 02) $\rightarrow$ Context Extraction (Phase 03) $\rightarrow$ AI Scoring (Phase 04) $\rightarrow$ Guardrail Validation (Phases 05 & 06) $\rightarrow$ **Data-Plane Actuator (Phase 10)** $\rightarrow$ **SDN Switch (Phase 07)** $\rightarrow$ Online Feedback (Phase 08) $\rightarrow$ **Comparative Evaluation (Phase 09)** $\rightarrow$ **Web Dashboard (Phase 11)**.
 
+### Chronological Development Phases vs. Runtime Pipeline
+
+| Phase | Module & Subsystem | Primary Code File | Runtime Pipeline Function |
+|:---:|---|---|---|
+| **Phase 01** | Module 01: Slicing Topology | [`topology/topology.py`](topology/topology.py) | Mininet OVS Data Plane Foundation (10 Mbps bottleneck) |
+| **Phase 02** | Module 02: Telemetry Collector | [`telemetry/monitor.py`](telemetry/monitor.py) | Step 1: Active `mnexec` probing & passive interface stats |
+| **Phase 03** | Module 03: Context Builder | [`ai/context_builder.py`](ai/context_builder.py) | Step 2: 6D feature vector normalization $\mathbf{x}_t \in \mathbb{R}^6$ |
+| **Phase 04** | Module 04: SRA-LinUCB Engine | [`ai/linucb.py`](ai/linucb.py) | Step 3: Contextual bandit scoring with risk penalty |
+| **Phase 05** | Module 05: Security Profiling | [`security/security_config.py`](security/security_config.py) | Step 4: WireGuard $1.2\text{ ms}$ cryptographic overhead budget |
+| **Phase 06** | Module 06: Deterministic Guardrail | [`guardrail/guardrail.py`](guardrail/guardrail.py) | Step 5: 6 hard safety gates & deterministic repair engine |
+| **Phase 07** | Module 07: Ryu SDN Controller | [`controller/ryu_controller.py`](controller/ryu_controller.py) | Step 6: OpenFlow 1.3 flow modification & MAC learning |
+| **Phase 10** | Module 10: Data-Plane Actuator | [`controller/slicing_actuator.py`](controller/slicing_actuator.py) | Step 7: Linux `tc` HTB rate classes & read-back verify |
+| **Phase 08** | Module 08: Reward & Learner | [`feedback/reward.py`](feedback/reward.py) | Step 8: Multi-objective reward & Causal Safe Attribution |
+| **Phase 09** | Module 09: Simulation Benchmark | [`experiments/run_experiments.py`](experiments/run_experiments.py) | Step 9: 20-step dynamic evaluation (Static vs Unsafe vs Safe) |
+| **Phase 11** | Module 11: Streamlit Dashboard | [`dashboard/app.py`](dashboard/app.py) | Step 10: 6-view interactive web UI on port `8501` |
+| **Phase 12** | Production Roadmap Orchestrator| [`docs/CONTRIBUTIONS_AND_FUTURE_WORK.md`](docs/CONTRIBUTIONS_AND_FUTURE_WORK.md) | Step 11: Unified autonomous live closed-loop runner |
+
+---
+
+### Phase 01 / Module 01: Physical Network Topology (`topology/`)
+- **File:** [`topology/topology.py`](topology/topology.py)
+- **Role:** Builds the OpenFlow 1.3 dual-switch, 6-host Mininet topology. Configures the 10 Mbps bottleneck link with 5 ms delay.
+
+### Phase 02 / Module 02: Network Telemetry Collector (`telemetry/`)
+- **File:** [`telemetry/monitor.py`](telemetry/monitor.py)
+- **Role:** Non-invasive telemetry probe. Solves Mininet host namespace isolation by querying host process IDs (PIDs) and executing probes inside host network namespaces via `mnexec -a <PID> ping`. Collects passive interface bytes from `/sys/class/net/` and egress queue backlog from Linux `tc`.
+- **Integrity Design:** Missing packets or unreachable hosts defensively produce sentinel `-1.0 ms` records rather than synthetic falsifications.
+
+### Phase 03 / Module 03: Context & Feature Extraction (`ai/context_builder.py`)
+- **File:** [`ai/context_builder.py`](ai/context_builder.py)
+- **Role:** Normalizes telemetry into a sanitized 6D numerical context vector $\mathbf{x}_t \in \mathbb{R}^6$:
+  - $x_0 = 1.0$: Bias / intercept term.
+  - $x_1 = \min(1.0, \text{latency} / 50.0)$: Bounded latency metric.
+  - $x_2 = \min(1.0, \text{throughput} / 10.0)$: Link utilization metric.
+  - $x_3 = \min(1.0, \text{queue} / 50.0)$: Buffer occupancy ratio.
+  - $x_4 \in [-1.0, 1.0]$: Latency velocity trend $(\Delta \text{latency} / \Delta t)$.
+  - $x_5 \in [0.0, 1.0]$: Packet drop ratio.
+- **Sentinel Sanitization:** Automatically translates sentinel `-1.0` into $1.0$ (worst-case), preventing math crashes.
+
+### Phase 04 / Module 04: SRA-LinUCB Decision Engine (`ai/linucb.py`)
+- **File:** [`ai/linucb.py`](ai/linucb.py)
+- **Role:** Contextual bandit resource allocation with three discrete actions:
+  - `0: DECREASE_EMBB` ($\rho_0 = -1.0$) — Throttles eMBB to relieve congestion.
+  - `1: MAINTAIN` ($\rho_1 = 0.0$) — Holds steady to prevent control chatter.
+  - `2: INCREASE_EMBB` ($\rho_2 = +1.0$) — Expands eMBB to reclaim spare link budget.
+- **Decision Formula:**
+  $$\text{Score}_a(\mathbf{x}_t) = \underbrace{\mathbf{x}_t^T \hat{\boldsymbol{\theta}}_a + \alpha \sqrt{\mathbf{x}_t^T \mathbf{A}_a^{-1} \mathbf{x}_t}}_{\text{Standard LinUCB Exploitation + Exploration}} - \underbrace{\lambda \cdot \rho_a \cdot R(\mathbf{x}_t)}_{\text{SRA Risk Penalty}}$$
+  Where $R(\mathbf{x}_t) = 0.4 x_1 + 0.3 x_3 + 0.2 \max(0, x_4) + 0.1 x_5$ is the physical risk indicator.
+- **Numerical Stability:** Solves the linear system $\mathbf{A}_a \hat{\boldsymbol{\theta}}_a = \mathbf{b}_a$ using `np.linalg.solve()` rather than explicit matrix inversion (`np.linalg.inv()`), ensuring stability and $O(d^2)$ efficiency.
+
+### Phase 05 / Module 05: Security State & Overhead Profiling (`security/`)
+- **File:** [`security/security_config.py`](security/security_config.py)
+- **Role:** Profiles the cryptographic delay introduced by WireGuard tunnel encryption ($1.2\text{ ms}$ empirical overhead) so security overhead is accounted for before reaching the 15 ms latency ceiling.
+
+### Phase 06 / Module 06: Deterministic SLA & Security Guardrail (`guardrail/`)
+- **File:** [`guardrail/guardrail.py`](guardrail/guardrail.py)
+- **Role:** The immutable safety barrier. Pre-validates all candidate actions against 6 hard gates:
+  1. Total Capacity Gate: $\sum \text{Bandwidth} \le 10.0\text{ Mbps}$.
+  2. URLLC Reservation Floor Gate: $\text{BW}_{\text{URLLC}} \ge 3.0\text{ Mbps}$.
+  3. URLLC Latency Gate: $\text{Observed Latency} \le 15.0\text{ ms}$.
+  4. Packet Loss Gate: $\text{Loss} \le 1.0\%$.
+  5. Security Threat Gate: $\text{Risk} \le 0.70$.
+  6. Crypto Overhead Gate: Security delay $\le 5.0\text{ ms}$.
+- **Deterministic Repair Engine:** If an AI action exceeds link capacity, rather than dropping traffic, it mathematically recalculates the allocation:
+  $$\text{URLLC}_{\text{repaired}} = 3.0\text{ Mbps (Locked Floor)}$$
+  $$\text{BE}_{\text{repaired}} = 0.5\text{ Mbps (Protected Baseline)}$$
+  $$\text{eMBB}_{\text{repaired}} = 10.0 - 3.0 - 0.5 = 6.5\text{ Mbps (Remaining Budget)}$$
+
+### Phase 07 / Module 07: SDN Control Plane with Ryu (`controller/`)
+- **File:** [`controller/ryu_controller.py`](controller/ryu_controller.py)
+- **Role:** Implements an OpenFlow 1.3 learning switch controller on TCP port 6633. Installs table-miss flow entries and handles flow modifications.
+
+### Phase 08 / Module 08: Closed-Loop Reward Engine & Feedback Learner (`feedback/`)
+- **Files:** [`feedback/reward.py`](feedback/reward.py) and [`feedback/learner.py`](feedback/learner.py)
+- **Role:** Computes multi-objective scalar rewards incorporating throughput, latency, loss, and a steep quadratic SLA barrier penalty $\left(\frac{\Delta\text{lat}}{15.0}\right)^2$.
+- **Causal Safe Attribution:** Ensures model covariance matrices $(\mathbf{A}_a, \mathbf{b}_a)$ are updated strictly for the action executed on the physical switches. Rejected actions receive no updates, preventing model corruption.
+
+### Phase 09 / Module 09: Trace-Driven Simulation Benchmark (`experiments/`)
+- **Files:** [`experiments/run_experiments.py`](experiments/run_experiments.py), [`experiments/static_baseline.py`](experiments/static_baseline.py), [`experiments/dynamic_baseline.py`](experiments/dynamic_baseline.py), [`experiments/proposed_system.py`](experiments/proposed_system.py)
+- **Role:** Comprehensive trace-driven simulation benchmarking comparing Static Slicing vs. Unconstrained AI vs. the Proposed AI-Safe System.
+- **First-Principles Queuing Physics:**
+  - Implements a fluid FIFO buffer model on a 10.0 Mbps bottleneck link with a maximum queue capacity of $Q_{\text{max}} = 50\text{ packets}$.
+  - Derives exact packet serialization latency from Ethernet MTU physics: a standard $1500\text{-byte}$ packet contains $12,000\text{ bits}$. On a $10.0\text{ Mbps}$ bottleneck, transmission serialization delay is exactly:
+    $$\tau_{\text{serial}} = \frac{12,000\text{ bits}}{10,000,000\text{ bps}} = 1.20\text{ ms/packet}$$
+  - The instantaneous simulated round-trip time is computed from physical baseline RTT ($10.15\text{ ms}$), buffer backlog delay, and cryptographic delay:
+    $$RTT_{\text{sim}} = 10.15\text{ ms} + (Q_t \times 1.20\text{ ms}) + \Delta L_{\text{crypto}}$$
+- **Standardized 20-Step Workload Trace:**
+  - *Steps 1–7 (Healthy Baseline):* eMBB demands $3.5\text{ Mbps}$, URLLC consumes $1.0\text{ Mbps}$, total load $< 10\text{ Mbps}$.
+  - *Steps 8–11 (Severe Traffic Surge):* eMBB demand violently surges to $8.5\text{ Mbps}$ on the shared $10\text{ Mbps}$ bottleneck.
+  - *Steps 12–20 (Recovery & Stabilization):* eMBB demand relaxes to $4.0\text{ Mbps}$.
+- **Comparative Regimes Evaluated:**
+  1. *Static Partitioning Baseline:* Fixed allocation (`URLLC: 3.0, eMBB: 5.0, BE: 2.0 Mbps`). Maintains $0\%$ SLA violations but artificially starves eMBB during the surge and leaves bandwidth idle off-peak.
+  2. *Unsafe Dynamic Baseline:* Standard LinUCB without safety constraints ($\lambda = 0.0$, Guardrail disabled). Greedily allocates $9.0\text{ Mbps}$ to eMBB at Step 11, causing queue accumulation ($16.67\text{ pkts}$) and spiking latency to **$30.15\text{ ms}$**—violating the $15.0\text{ ms}$ SLA.
+  3. *Proposed AI-Safe System:* SRA-LinUCB ($\lambda = 0.5$) with Module 06 Guardrail and Module 08 Feedback. Intercepts candidate overloads, triggers deterministic repair, locks URLLC at $\ge 3.0\text{ Mbps}$, caps eMBB to $6.5\text{ Mbps}$, and delivers **$100\%$ SLA compliance (0 violations)** with **$12.51\text{ ms}$ peak latency**.
+- **Generated Artifacts:** Generates 24-column standardized CSV trace logs, formatted summary tables (`results/summary_table.md`), and high-resolution comparison plots (`results/*.png`).
+
+### Phase 10 / Module 10: Dynamic Data-Plane Rate Actuation (`controller/`)
+- **File:** [`controller/slicing_actuator.py`](controller/slicing_actuator.py)
+- **Role:** Bridges Module 06 Guardrail decisions directly into the Open vSwitch data plane and Linux kernel Traffic Control (`tc`) subsystem.
+- **Linux Traffic Control (`tc`) Hierarchical Token Bucket (HTB) Architecture:**
+  - Configures the egress queue discipline on the switch bottleneck interface (`s1-eth4`):
+    ```bash
+    tc qdisc add dev s1-eth4 root handle 1: htb default 30
+    ```
+  - Dynamically updates hierarchical rate classes based on approved decisions:
+    - `Class 1:10 (URLLC)`: `rate 3.0Mbit ceil 10.0Mbit prio 0` (Highest priority, guaranteed floor).
+    - `Class 1:20 (eMBB)`: `rate <embb>Mbit ceil 10.0Mbit prio 1` (Medium priority, dynamic burst).
+    - `Class 1:30 (Best-Effort)`: `rate <be>Mbit ceil 10.0Mbit prio 2` (Lowest priority, background).
+- **OpenFlow 1.3 Queue Classification:**
+  - Generates OpenFlow flow rules matching IP/port tuples and executing `set_queue:<id>` before forwarding to switch output ports.
+- **Kernel Read-Back Verification:**
+  - Following every rate change, executes `/sbin/tc -s class show dev s1-eth4` and verifies that the active kernel rates match the target allocation within a numerical tolerance of $\pm 0.1\text{ Mbps}$.
+- **Atomic Safety Fallback & Emergency Rollback:**
+  - If any Linux `tc` command returns a non-zero exit code or fails read-back verification, the actuator immediately triggers an atomic rollback to `KNOWN_SAFE_ALLOCATION = {'URLLC': 3.0, 'eMBB': 5.0, 'BE': 2.0}`, ensuring network traffic never freezes.
+
+### Phase 11 / Module 11: Real-Time Interactive Web Dashboard (`dashboard/`)
+- **Files:** [`dashboard/app.py`](dashboard/app.py) and [`dashboard/data_loader.py`](dashboard/data_loader.py)
+- **Role:** Production-ready Streamlit web interface operating on port `8501`, designed for interactive faculty demonstrations, telemetry analysis, and technical defense.
+- **Six Comprehensive System Views:**
+  1. *1. Overview & Topology:* Displays the multi-tenant topology, QoS profile table, and end-to-end closed-loop control pipeline.
+  2. *2. Telemetry Monitoring:* Live time-series charts for URLLC latency (with red dashed 15.0 ms SLA threshold line), bottleneck throughput, loss %, and queue occupancy. Features an isolated audit expander for dropped/unreachable `-1.0` sentinel records.
+  3. *3. AI Decision Engine:* Interactive demo sliders allowing examiners to adjust latency, loss, throughput, and queue occupancy in real time. Visualizes the live 6D context vector $\mathbf{x}_t \in \mathbb{R}^6$ and displays the complete SRA-LinUCB diagnostic scoring breakdown table.
+  4. *4. Security & SLA Guardrail:* Sandbox for testing arbitrary candidate allocations. Shows live status badges (`APPROVED`, `REPAIRED`, `REJECTED`), side-by-side requested vs forwarded allocations, and WireGuard cryptographic delay toggling ($1.2\text{ ms}$).
+  5. *5. Evaluation & Benchmarks:* Formats and renders the simulation benchmark datasets, comparative plots (`comparison.png`, `latency.png`, `throughput.png`), and markdown summary table.
+  6. *6. Actuator & Data Plane:* Provides Dry-Run vs Live execution modes, displays real-time generated Linux `tc` shell commands, shows read-back verification JSONs, and lists OpenFlow queue classification rules.
+
+### Phase 12 / Production Roadmap: Unified Live Closed-Loop Runner
+- **Role:** Autonomous orchestrator linking physical Mininet traffic injection, namespace-aware telemetry probing, 6D context normalization, SRA-LinUCB scoring, deterministic Guardrail verification, Linux `tc` actuation, and causal feedback learning in continuous autonomous 1-second control cycles.
+
+
+---
+
+## 5. Experimental Results & Benchmark Evaluation
+
+Evaluated across a standardized 20-step dynamic traffic trace featuring an 8.5 Mbps eMBB traffic surge on a 10.0 Mbps bottleneck link.
+
+### Scientific Benchmark Performance Summary Table
+
+| Performance Metric | Static Slicing (Fixed) | Dynamic Slicing (Unsafe LinUCB) | Proposed System (AI-Safe System) | Architectural Significance |
+|---|:---:|:---:|:---:|---|
+| **URLLC Mean Simulated RTT** | **10.15 ms** | 11.15 ms | **11.07 ms** | Healthy baseline across all regimes |
+| **URLLC 99th-Percentile (p99) RTT** | **10.15 ms** | **26.35 ms** *(BREACH)* | **12.51 ms** *(SAFE)* | **Unsafe AI breaches 15 ms SLA; Proposed remains strictly safe** |
+| **eMBB Mean Throughput** | 4.02 Mbps | 4.24 Mbps | **4.19 Mbps** | **Proposed delivers +4.2% higher throughput than static** |
+| **eMBB Peak Throughput** | 5.00 Mbps | 8.50 Mbps *(Hazardous)*| **6.50 Mbps** *(Safe Max)* | Proposed safely reclaims idle capacity without congestion |
+| **URLLC Packet Loss** | **0.0 %** | **0.0 %** | **0.0 %** | Zero dropped packets |
+| **SLA Violations (Count / %)** | **0 (0.0%)** | **1 (5.0%)** | **0 (0.0%)** | **100% SLA preservation with AI active** |
+| **Congestion Recovery Time** | **0.0 s** | 1.0 s | **0.0 s** | Zero buffer backlog overflow |
+| **Guardrail Repaired Actions** | 0 (N/A) | 0 (Disabled) | **3 (Active Repairs)** | Proves guardrail actively intervened during the surge |
+| **Security Overhead Mode** | N/A | Ignored | **Simulated (1.2 ms)** | WireGuard crypto latency factored into decision |
+| **Deterministic Safety Guard** | No | No | **Yes (Module 06)** | Un-bypassable mathematical guarantee |
+
+### Visual Artifacts in `results/`
+
+All evaluation plots are generated directly by `experiments/run_experiments.py`:
+1. **[`results/comparison.png`](results/comparison.png):** Side-by-side grouped bar chart illustrating SLA violations (%), mean latency, and throughput across all three regimes.
+2. **[`results/latency.png`](results/latency.png):** 3-panel time series plotting simulated RTT against the red dashed **15.0 ms SLA threshold line**. Unsafe LinUCB spikes to **30.15 ms** at Step 11, whereas the Proposed System stays safely bounded at **12.51 ms**.
+3. **[`results/throughput.png`](results/throughput.png):** Bandwidth allocation timeline showing how the Guardrail expands eMBB to 6.5 Mbps while preserving the 3.0 Mbps URLLC safety floor.
+
+---
+
+## 6. Complete Step-by-Step Running Guide
+
+### Prerequisites
+- **Operating System:** Linux (Ubuntu 22.04 LTS recommended) or **Windows WSL2** (Ubuntu).
+- **Python:** 3.9, 3.10, or 3.11.
+- **Packages:** Ryu 4.34, Mininet 2.3.0, Open vSwitch 3.x, Streamlit 1.30+.
+
+Install all Python dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+### Command 1: Run Full 154-Test Verification Suite
+Verifies all modules, math formulas, guardrail gates, and actuator commands:
+```bash
+pytest --disable-warnings -q
+```
+**Expected Output:**
 ```text
-==================================================================================
- SIMULATION BENCHMARK SUMMARY TABLE (Trace-Driven Model)
- NOTE: Results are derived from a simplified FIFO queuing simulation model.
-==================================================================================
-Metric                         | Static (Fixed) | Dynamic (Unsafe) | Proposed (AI-Safe)
-----------------------------------------------------------------------------------
-URLLC Mean Simulated RTT       | 10.15 ms       | 11.15 ms         | 11.07 ms        
-URLLC 99th-Percentile RTT      | 10.15 ms       | 26.35 ms (breach)| 12.51 ms (safe) 
-eMBB Mean Throughput           | 4.02 Mbps      | 4.24 Mbps        | 4.19 Mbps       
-eMBB Peak Throughput           | 5.00 Mbps      | 8.50 Mbps        | 6.50 Mbps       
-URLLC Packet Loss              | 0.0 %          | 0.0 %            | 0.0 %           
-SLA Violations (count / %)     | 0 (0.0%)       | 1 (5.0%)         | 0 (0.0%)        
-Congestion Recovery Time       | 0.0 s          | 1.0 s            | 0.0 s           
-Guardrail Repaired Actions     | 0 (N/A)        | 0 (Disabled)     | 3 (Active)      
-Security Overhead Mode         | N/A            | Ignored          | Simulated (1.2 ms)
-Deterministic Safety Guard     | No             | No               | Yes (Module 6)  
-==================================================================================
+154 passed, 14 warnings in 24.55s (100% Success Rate)
 ```
-
-### Analysis of Regimes
-
-1. **Static Slicing (Fixed Partitioning):**
-   - Fixed allocation: URLLC $3.0\text{ Mbps}$, eMBB $5.0\text{ Mbps}$, BE $2.0\text{ Mbps}$.
-   - **Advantage:** Predictable; zero SLA violations ($RTT = 10.15\text{ ms}$).
-   - **Disadvantage:** Inflexible; throttles eMBB throughput at $5.0\text{ Mbps}$ during peak demand despite idle bandwidth.
-2. **Dynamic Slicing Without Safety (Unsafe LinUCB):**
-   - Risk-neutral LinUCB ($\lambda = 0.0$, guardrail disabled).
-   - **Behavior:** Greedily allocates $9.0\text{ Mbps}$ to eMBB during the surge. Aggregate load reaches $13.0\text{ Mbps}$, causing buffer accumulation ($16.67\text{ pkts}$), spiking latency to **$30.15\text{ ms}$**, and breaching the $15.0\text{ ms}$ SLA.
-3. **Proposed AI-Safe Dynamic Slicing:**
-   - SRA-LinUCB ($\lambda = 0.5$) with Module 6 Deterministic Guardrail and Module 8 Reward Feedback.
-   - **Behavior:** During the surge, candidate requests of $13.0\text{ Mbps}$ are intercepted and deterministically repaired: URLLC reservation is protected at $\ge 3.0\text{ Mbps}$, BE is preserved, and eMBB is capped at $6.5\text{ Mbps}$.
-   - **Outcome:** Zero SLA violations ($RTT_{\text{p99}} = 12.51\text{ ms}$), $0\text{ s}$ recovery time, and higher throughput ($4.19\text{ Mbps}$ mean) than static slicing.
-
-### Generated Artifacts in `results/`
-
-- [`results/comparison.png`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/results/comparison.png): Comparative bar chart (SLA Violations, Mean Latency, Throughput).
-- [`results/latency.png`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/results/latency.png): 3-panel time-series showing URLLC latency response across all 20 steps.
-- [`results/throughput.png`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/results/throughput.png): 3-panel time-series tracking per-slice bandwidth allocations.
-- [`results/summary_table.md`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/results/summary_table.md): Formatted GitHub markdown comparison table.
-- [`results/summary_table.txt`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/results/summary_table.txt): Clean text comparison table.
-- [`results/static_results.csv`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/results/static_results.csv), [`dynamic_results.csv`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/results/dynamic_results.csv), [`proposed_results.csv`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/results/proposed_results.csv): Raw 24-column datasets.
 
 ---
 
-## 5. Verification & Regression Suite (114 / 114 Passing)
-
-The complete codebase is validated by **114 automated unit and integration tests** passing with 100% success:
-
-```text
-============================= 114 passed in 1.80s =============================
-```
-
-### Complete Test Suite Breakdown
-
-| Test File | Module Under Test | Test Count | Scope Verified |
-|---|---|:---:|---|
-| [`ai/test_context_builder.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/ai/test_context_builder.py) | Module 03 (Context) | 17 | 6D normalization bounds, trend velocity, negative velocity, sentinel handling |
-| [`ai/test_linucb.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/ai/test_linucb.py) | Module 04 (SRA-LinUCB) | 11 | Ridge regression updates, matrix solving (`solve` vs `inv`), risk dampening |
-| [`ai/test_integration.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/ai/test_integration.py) | Modules 02 $\rightarrow$ 03 $\rightarrow$ 04 | 6 | Dataflow integrity, multi-cycle healthy/congested transitions |
-| [`telemetry/test_telemetry.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/telemetry/test_telemetry.py) | Module 02 (Telemetry) | 15 | Active ping parsing, loss percentage, rate calculation, queue backlog parsing |
-| [`tests/test_security.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/tests/test_security.py) | Module 05 (Security) | 13 | SecurityState dataclass, crypto overhead metrics, WireGuard fallback probe |
-| [`tests/test_guardrail.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/tests/test_guardrail.py) | Module 06 (Guardrail) | 14 | Hard capacity limits, URLLC latency gate, loss gate, proportional repair |
-| [`tests/test_pipeline_guardrail.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/tests/test_pipeline_guardrail.py) | M2 $\rightarrow$ M3 $\rightarrow$ M4 $\rightarrow$ M6 | 7 | End-to-end closed-loop validation across 7 operational network scenarios |
-| [`tests/test_slice_config.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/tests/test_slice_config.py) | Slicing Config | 5 | Slice bandwidth floors, capacity ceiling constraints, default validation |
-| [`feedback/test_reward.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/feedback/test_reward.py) | Module 08 (Reward Engine) | 8 | Multi-objective reward bounds, quadratic SLA barrier penalty, security term |
-| [`feedback/test_learner.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/feedback/test_learner.py) | Module 08 (Feedback Learner)| 4 | SRA-LinUCB parameter updates, causal arm attribution, convergence |
-| [`feedback/test_feedback.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/feedback/test_feedback.py) | Module 08 (Package Tests) | 2 | Module export sanity, legacy compatibility wrappers |
-| [`tests/test_feedback.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/tests/test_feedback.py) | Module 08 Integration | 5 | Safe feedback attribution on rejected/repaired actions, sentinel handling |
-| [`tests/test_experiments.py`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/tests/test_experiments.py) | Module 09 (Experiments) | 7 | FIFO queue dynamics, buffer overflow, real guardrail intervention, schema |
-| **Total** | **Full Regression Suite** | **114** | **100% Passed** across Python 3.9, 3.10, and 3.11 |
-
----
-
-## 6. Setup & Execution Instructions
-
-### Environment Prerequisites
-
-- **OS:** Windows 10/11 or Ubuntu 22.04 LTS (native or WSL2).
-- **Python:** Python 3.9 (for Ryu SDN controller) / Python 3.10 or 3.11 (for AI, Guardrail, Feedback, and Experiments).
-- **Packages:** `numpy`, `matplotlib`, `pytest` (listed in [`requirements.txt`](file:///C:/Users/Gadi%20Srihari%20Reddy/AI-Safe-Dynamic-Slicing/requirements.txt)).
-
----
-
-### Execution Option 1: Automated Testing & Evaluation (Windows / Linux)
-
-#### 1. Run the Full 114-Test Regression Suite
-```bash
-pytest
-```
-*(To suppress third-party matplotlib deprecation warnings on Python 3.9, run `pytest --disable-warnings`).*
-
-#### 2. Run Module 9 Experiments & Regenerate Graphs
-```bash
-python experiments/run_experiments.py
-```
-*(Executes all three slicing regimes across the 20-step workload, writes CSV files, plots latency/throughput/comparison PNGs, and prints the summary table).*
-
-#### 3. Display the Benchmark Comparison Table Instantly
-```bash
-python experiments/run_experiments.py --table-only
-```
-*(Loads saved experiment data instantly and saves clean copies to `results/summary_table.md` and `results/summary_table.txt`).*
-
-#### 4. Run the Interactive 5-Step Pipeline Simulation
+### Command 2: Run the 5-Step Live Pipeline Walkthrough
+Traces live telemetry dataflow into the 6D context vector, calculates risk $R(\mathbf{x}_t)$, and demonstrates proactive risk suppression:
 ```bash
 python ai/test_pipeline_live.py
 ```
-*(Demonstrates the live dataflow from telemetry to context vector $\mathbf{x}_t$, risk penalties, and LinUCB candidate selection).*
+**Expected Output:** Shows low risk ($R=0.083$) under healthy conditions, and high risk ($R=0.663$) during congestion, automatically steering SRA-LinUCB from `INCREASE_EMBB` to `DECREASE_EMBB`.
 
 ---
 
-### Execution Option 2: Live SDN Network Testbed (WSL2 / Ubuntu Linux)
-
-To run the live closed loop against Mininet and Ryu:
-
-#### Terminal 1: Start Ryu SDN Controller (Control Plane)
+### Command 3: Run Benchmark Simulation & View Table
+Executes the trace-driven comparative benchmark and prints the performance table:
 ```bash
-cd ~/AI-Safe-Dynamic-Slicing
-pyenv activate ryu-3.9
+# Print summary table instantly:
+python experiments/run_experiments.py --table-only
+
+# Or run full simulation to re-generate all CSVs and PNG plots:
+python experiments/run_experiments.py
+```
+
+---
+
+### Command 4: Run the Interactive Streamlit Web Dashboard
+Launches the web UI for live presentations and faculty defense:
+```bash
+streamlit run dashboard/app.py
+```
+Open your browser to: **`http://localhost:8501`**
+
+#### What to Show on the Dashboard:
+1. **Overview & Topology:** 10.0 Mbps bottleneck, 3 slices, 15.0 ms SLA ceiling, 3.0 Mbps floor.
+2. **Telemetry Monitoring:** Live latency time-series vs 15.0 ms SLA threshold line, throughput, and audit of sentinel `-1.0` records.
+3. **AI Decision Engine:** Interactive sliders to adjust latency/queue. Shows real-time 6D context vector construction and SRA-LinUCB diagnostic scoring breakdown.
+4. **Security & SLA Guardrail:** Set an unsafe candidate allocation (e.g., URLLC = 2.0, eMBB = 7.0, BE = 2.5). Watch the Guardrail trigger **`STATUS: REPAIRED`** and clamp URLLC to 3.0 Mbps.
+5. **Evaluation & Benchmarks:** Full scientific summary table and interactive tabs for all 3 comparison plots.
+6. **Actuator & Data Plane:** Click "Apply Allocation" in dry-run mode to see formatted Linux `tc` commands and read-back verification.
+
+---
+
+### Command 5: Full Live Mininet + Ryu Testbed (Multi-Terminal)
+
+For a live network demonstration on Ubuntu/WSL:
+
+#### Terminal 1: Start Ryu SDN Controller
+```bash
 ryu-manager controller/ryu_controller.py --verbose
-keep running it dont close
 ```
+*(Controller initializes on port 6633 and waits for switches).*
 
-#### Terminal 2: Start Mininet Network (Data Plane)
+#### Terminal 2: Start Mininet Network
 ```bash
-cd ~/AI-Safe-Dynamic-Slicing
-pyenv activate ryu-3.9
-sudo mn -c   # Clean up residual state
-sudo "$(pyenv which python)" topology/topology.py
+sudo mn -c   # Clean up any residual switch state
+sudo python topology/topology.py
 ```
+*(Mininet starts; Terminal 1 will immediately print `Switch connected: 1` and `Switch connected: 2`).*
 
-#### Terminal 3: Generate Traffic in Mininet
-In Terminal 2 at the `mininet>` prompt:
+#### Terminal 2 (Inside Mininet CLI): Generate Congestion
 ```text
-# Verify connectivity
+# 1. Verify connectivity
 mininet> pingall
 
-# Start iperf3 servers on sink hosts
+# 2. Start iperf3 servers on sink hosts H4 and H5
 mininet> h4 iperf3 -s -D
 mininet> h5 iperf3 -s -D
 
-# Inject heavy eMBB traffic surge (H2 -> H5)
-mininet> h2 iperf3 -c 10.0.0.5 -u -b 8.5M -t 60 &
+# 3. Check baseline healthy latency (averages ~10.15 ms)
+mininet> h1 ping -c 5 10.0.0.4
 
-# Ping URLLC (H1 -> H4)
-mininet> h1 ping -i 0.2 -c 50 10.0.0.4
+# 4. Inject heavy 8.5 Mbps eMBB traffic burst
+mininet> h2 iperf3 -c 10.0.0.5 -u -b 8.5M -t 40 &
+
+# 5. Measure latency under congestion (spikes to >30 ms without guardrail)
+mininet> h1 ping -c 10 10.0.0.4
 ```
 
-#### Terminal 4: Start Network Telemetry Monitor
+#### Terminal 3: Start Telemetry Monitor
 ```bash
-cd ~/AI-Safe-Dynamic-Slicing
 sudo python telemetry/monitor.py
 ```
-
-#### Terminal 5: Run Live Closed-Loop AI Pipeline
-```bash
-cd ~/AI-Safe-Dynamic-Slicing
-python ai/test_pipeline_live.py --live
-```
+*(Streams live measurements to `data/telemetry.csv`).*
 
 ---
 
-## 7. Repository Directory Structure
+## 7. Repository File Structure
 
 ```text
 AI-Safe-Dynamic-Slicing/
-├── README.md                      # Comprehensive system documentation
-├── requirements.txt               # Project dependencies
-├── COMPLETE_PROJECT_EXPLANATION.md # Master project explanation, architecture & results guide
-├── PROJECT_PHASES_EXPLANATION.md  # Detailed phase walkthrough and Viva Q&A
+├── .gitignore                      # Git configuration (tracks benchmarks & sample data)
+├── .python-version                 # Pyenv specification (3.10.14 / 3.9.18)
+├── README.md                       # Master comprehensive documentation & execution guide
+├── requirements.txt                # Complete Python dependencies (Ryu, Streamlit, Pytest...)
 │
-├── topology/                      # Module 01: SDN Network & Topology
-│   └── topology.py                # Mininet 2-switch, 6-host 10 Mbps bottleneck topology
+├── topology/                       # Module 01: Physical Data Plane Topology
+│   └── topology.py                 # Mininet topology, 2 switches, 6 hosts, 10 Mbps bottleneck
 │
-├── controller/                    # Module 07: SDN Control Plane
-│   └── ryu_controller.py          # Ryu OpenFlow 1.3 MAC-learning switch controller
+├── telemetry/                      # Module 02: Network Telemetry Collector
+│   ├── monitor.py                  # Namespace-aware active & passive telemetry monitor
+│   └── test_telemetry.py           # Unit tests for ping parsing, loss %, and queue parsing
 │
-├── telemetry/                     # Module 02: Network Telemetry Collector
-│   ├── monitor.py                 # TelemetryRecord, namespace-aware probing, tc parser
-│   └── test_telemetry.py          # 15 unit tests for telemetry
+├── ai/                             # Modules 03 & 04: AI Context Builder & SRA-LinUCB
+│   ├── context_builder.py          # 6D context vector extraction & sentinel sanitization
+│   ├── linucb.py                   # SRA-LinUCB decision engine with proactive risk penalty
+│   ├── test_context_builder.py     # Unit tests for context normalization
+│   ├── test_linucb.py              # Unit tests for bandit math & solve operations
+│   ├── test_integration.py         # M2 -> M3 -> M4 integration tests
+│   └── test_pipeline_live.py       # Live 5-step synthetic pipeline demonstration script
 │
-├── ai/                            # Modules 03 & 04: Context Builder & SRA-LinUCB
-│   ├── context_builder.py         # Module 03: 6D context extraction and trend velocity
-│   ├── linucb.py                  # Module 04: SRA-LinUCB contextual bandit
-│   ├── test_context_builder.py    # 17 unit tests for context building
-│   ├── test_linucb.py             # 11 unit tests for SRA-LinUCB algorithm
-│   ├── test_integration.py        # 6 integration tests (M2 -> M3 -> M4)
-│   └── test_pipeline_live.py      # Standalone live interactive pipeline demonstration
+├── security/                       # Module 05: Cryptographic Overhead & WireGuard
+│   ├── security_config.py          # SecurityState dataclass & 1.2 ms WireGuard delay profile
+│   ├── security_metrics.py         # Security metric calculation wrappers
+│   └── wireguard_adapter.py        # System WireGuard interface & fallback query adapter
 │
-├── security/                      # Module 05: Security & Overhead Profiling
-│   ├── security_config.py         # SecurityState dataclass, modes, protocol defaults
-│   ├── security_metrics.py        # Overhead calculations (crypto delay, rate penalty)
-│   └── wireguard_adapter.py       # WireGuard adapter probe and simulation fallback
+├── guardrail/                      # Module 06: Deterministic SLA & Security Guardrail
+│   ├── guardrail.py                # Pre-execution validator enforcing 6 gates & repair engine
+│   └── sla_config.py               # GuardrailConfig boundaries & thresholds
 │
-├── guardrail/                     # Module 06: Deterministic SLA & Security Guardrail
-│   ├── sla_config.py              # GuardrailConfig dataclass (thresholds and limits)
-│   └── guardrail.py               # SLASecurityGuardrail validation and repair engine
+├── slicing/                        # Centralized Slice Specifications
+│   └── slice_config.py             # SliceQoSProfile definitions & DEFAULT_SLICING_CONFIG
 │
-├── feedback/                      # Module 08: Closed-Loop Feedback & Learning
-│   ├── __init__.py                # Package exports
-│   ├── reward.py                  # Continuous reward engine with quadratic SLA barrier
-│   ├── learner.py                 # Causal FeedbackLearner updating SRA-LinUCB
-│   ├── test_reward.py             # 8 unit tests for reward calculation
-│   ├── test_learner.py            # 4 unit tests for online parameter updates
-│   └── test_feedback.py           # 2 sanity and interface compatibility tests
+├── controller/                     # Modules 07 & 10: SDN Control Plane & Dynamic Actuator
+│   ├── ryu_controller.py           # Ryu OpenFlow 1.3 learning switch & flow installer
+│   └── slicing_actuator.py         # Linux tc HTB rate modifier & read-back verifier
 │
-├── slicing/                       # Slicing Configuration
-│   └── slice_config.py            # Bandwidth limits, slice profiles, and validation
+├── feedback/                       # Module 08: Reward Engine & Causal Feedback Learner
+│   ├── reward.py                   # Multi-objective reward with quadratic SLA penalty
+│   ├── learner.py                  # FeedbackLearner with Causal Safe Attribution
+│   ├── test_reward.py              # Unit tests for reward engine calculations
+│   ├── test_learner.py             # Unit tests for causal attribution updates
+│   └── test_feedback.py            # Integration tests for feedback loop
 │
-├── experiments/                   # Module 09: Evaluation & Comparative Benchmarks
-│   ├── static_baseline.py         # Benchmark 1: Static fixed partitioning (3/5/2 Mbps)
-│   ├── dynamic_baseline.py        # Benchmark 2: Unsafe dynamic LinUCB (no guardrail)
-│   ├── proposed_system.py         # Benchmark 3: Proposed AI-Safe system (M4 + M6 + M8)
-│   └── run_experiments.py         # Experiment runner, CSV loader, graph & table generator
+├── experiments/                    # Module 09: Trace-Driven Simulation Benchmarks
+│   ├── run_experiments.py         # Master runner comparing Static, Unsafe, and Proposed
+│   ├── static_baseline.py          # Static fixed partitioning simulation
+│   ├── dynamic_baseline.py         # Unsafe LinUCB baseline simulation
+│   └── proposed_system.py          # Proposed AI-Safe System simulation
 │
-├── tests/                         # Full Integration & Invariant Regression Suite
-│   ├── test_security.py           # 13 tests for security profiling
-│   ├── test_guardrail.py          # 14 tests for SLA guardrail validation
-│   ├── test_pipeline_guardrail.py # 7 end-to-end integration tests (M2 -> M3 -> M4 -> M6)
-│   ├── test_slice_config.py       # 5 tests for slice configuration constraints
-│   ├── test_feedback.py           # 5 integration tests for feedback attribution
-│   └── test_experiments.py        # 7 invariant tests for FIFO queuing and guardrail
+├── dashboard/                      # Module 11: Real-Time Interactive Web Dashboard
+│   ├── app.py                      # Streamlit application with 6 functional views
+│   └── data_loader.py              # Telemetry & benchmark CSV ingestion with sentinel audit
 │
-├── data/                          # Telemetry datasets
-│   └── telemetry.csv              # Runtime telemetry generated by monitor.py
+├── config/                         # System Configuration
+│   └── network_config.yaml         # Centralized network parameters & constants
 │
-└── results/                       # Generated Benchmark Results & Plots
-    ├── static_results.csv         # 24-column dataset for static baseline
-    ├── dynamic_results.csv        # 24-column dataset for dynamic unsafe baseline
-    ├── proposed_results.csv       # 24-column dataset for proposed AI-safe system
-    ├── latency.png                # URLLC latency comparison plot
-    ├── throughput.png             # eMBB throughput adaptation plot
-    ├── comparison.png             # Metric comparison bar chart
-    ├── summary_table.md           # Formatted markdown summary table
-    └── summary_table.txt          # Plain text summary table
+├── tests/                          # Automated Regression Test Suite (154/154 Passing)
+│   ├── test_actuator.py            # Tests for Linux tc commands & rollback
+│   ├── test_dashboard.py           # Headless smoke & UI component tests
+│   ├── test_experiments.py         # Tests for FIFO queuing simulator
+│   ├── test_feedback.py            # Tests for causal feedback updates
+│   ├── test_guardrail.py           # Tests for all 6 guardrail gates & repair
+│   ├── test_pipeline_guardrail.py  # End-to-end closed-loop pipeline tests
+│   ├── test_security.py            # Tests for security profiles & WireGuard adapter
+│   └── test_slice_config.py        # Tests for slice configuration invariants
+│
+├── data/                           # Real Telemetry Datasets
+│   └── telemetry.csv               # Measured network traces
+│
+├── results/                        # Generated Scientific Artifacts
+│   ├── summary_table.md            # Benchmark performance summary table (Markdown)
+│   ├── summary_table.txt           # Benchmark performance summary table (Plaintext)
+│   ├── comparison.png              # Grouped bar chart comparison
+│   ├── latency.png                 # 3-panel latency time-series vs 15 ms SLA ceiling
+│   ├── throughput.png              # 3-panel dynamic slice throughput adaptation
+│   ├── static_results.csv          # 20-step static slicing trace log
+│   ├── dynamic_results.csv         # 20-step unsafe dynamic slicing trace log
+│   └── proposed_results.csv        # 20-step proposed AI-Safe slicing trace log
+│
+└── docs/                           # Supplementary Technical Documentation
+    ├── CONTRIBUTIONS_AND_FUTURE_WORK.md # Research contributions & production roadmap
+    ├── DEMO_AND_TESTING_GUIDE.md        # Step-by-step faculty demonstration guide
+    ├── FORMULAS_METRICS_AND_GUARDRAILS.md # Complete mathematical reference
+    ├── MODULE_BY_MODULE_GUIDE.md        # Detailed module-by-module documentation
+    ├── QUICK_REVISION.md                # 5-minute quick revision before presentation
+    └── VIVA_QUESTIONS_AND_ANSWERS.md    # Comprehensive technical reference
 ```
 
 ---
 
-## 8. Remaining Roadmap for Full Final Deployment
+## 8. License & Attribution
 
-With Modules 1 through 9 fully implemented and passing all 114 tests, the remaining items for a complete final production release are:
-
-1. **Phase 10: Dynamic Data-Plane Actuation (`controller/slicing_actuator.py`)**:
-   - Push guardrail-approved safe bandwidth allocations directly to physical Open vSwitch flow tables using OpenFlow 1.3 Meter Bands (`OFPMeterMod`) or Linux HTB QoS queues via `tc` and `ovs-vsctl`.
-2. **Phase 11: Real-Time Telemetry & Monitoring Dashboard (`dashboard/app.py`)**:
-   - Build a browser-based UI (Streamlit or Dash) displaying real-time URLLC latency strip charts, dynamic slice allocation gauges, 6D context radar charts, and live guardrail status badges (`APPROVED`, `REJECTED`, `REPAIRED`).
-3. **Phase 12: Unified Live Closed-Loop Runner (`run_live_system.py`)**:
-   - Single-command orchestrator linking live Mininet traffic generation, telemetry monitoring, AI decision making, guardrail verification, data-plane actuation, and reward feedback learning into a unified real-time loop.
+This project is licensed under the MIT License. Developed for research in **AI-Driven Safe Dynamic Network Slicing for SLA-Preserving SDN Networks**.
