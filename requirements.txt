@@ -1,5 +1,8 @@
+# AI-Driven Safe Dynamic Network Slicing Dependencies
 ryu==4.34
-numpy
-pandas
-matplotlib
-pytest
+numpy>=1.24.0
+pandas>=2.0.0
+matplotlib>=3.7.0
+streamlit>=1.30.0
+pytest>=7.0.0
+pyyaml>=6.0

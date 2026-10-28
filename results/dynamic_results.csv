@@ -1,0 +1,21 @@
+step,time_s,mode,description,urllc_offered_mbps,embb_offered_mbps,be_offered_mbps,total_offered_mbps,urllc_alloc_mbps,embb_alloc_mbps,be_alloc_mbps,total_alloc_mbps,urllc_tput_mbps,embb_tput_mbps,be_tput_mbps,total_tput_mbps,embb_dropped_mbps,be_dropped_mbps,queue_occupancy_pkts,simulated_urllc_rtt_ms,urllc_packet_loss_pct,sla_violation,guardrail_status,reward
+1,1.0,DYNAMIC_UNSAFE_AI,Normal traffic,1.0,3.0,1.0,5.0,3.0,3.0,4.0,10.0,1.0,3.0,1.0,5.0,0.0,0.0,0.0,10.15,0.0,0,UNSAFE_BLIND,0.27
+2,2.0,DYNAMIC_UNSAFE_AI,Normal traffic,1.0,3.5,1.0,5.5,3.0,3.0,4.0,10.0,1.0,3.0,1.0,5.0,0.5,0.0,0.0,10.15,0.0,0,UNSAFE_BLIND,0.27
+3,3.0,DYNAMIC_UNSAFE_AI,Normal traffic,1.2,3.0,1.0,5.2,3.0,5.0,2.0,10.0,1.2,3.0,1.0,5.2,0.0,0.0,0.0,10.15,0.0,0,UNSAFE_BLIND,0.27
+4,4.0,DYNAMIC_UNSAFE_AI,Normal traffic,1.0,4.0,1.0,6.0,3.0,5.0,2.0,10.0,1.0,4.0,1.0,6.0,0.0,0.0,0.0,10.15,0.0,0,UNSAFE_BLIND,0.37
+5,5.0,DYNAMIC_UNSAFE_AI,Normal traffic,1.1,4.2,1.0,6.3,3.0,7.0,0.5,10.5,1.1,4.2,0.5,5.8,0.0,0.5,0.0,10.15,0.0,0,UNSAFE_BLIND,0.39
+6,6.0,DYNAMIC_UNSAFE_AI,eMBB surge start,1.5,7.0,1.0,9.5,3.0,5.0,2.0,10.0,1.5,5.0,1.0,7.5,2.0,0.0,0.0,10.15,0.0,0,UNSAFE_BLIND,0.47
+7,7.0,DYNAMIC_UNSAFE_AI,eMBB high surge,1.5,8.5,1.0,11.0,3.0,3.0,4.0,10.0,1.5,3.0,1.0,5.5,5.5,0.0,0.0,10.15,0.0,0,UNSAFE_BLIND,0.27
+8,8.0,DYNAMIC_UNSAFE_AI,eMBB peak surge,1.8,9.2,1.0,12.0,3.0,5.0,2.0,10.0,1.8,5.0,1.0,7.8,4.2,0.0,0.0,10.15,0.0,0,UNSAFE_BLIND,0.47
+9,9.0,DYNAMIC_UNSAFE_AI,eMBB peak surge,1.8,9.5,1.0,12.3,3.0,5.0,2.0,10.0,1.8,5.0,1.0,7.8,4.5,0.0,0.0,10.15,0.0,0,UNSAFE_BLIND,0.47
+10,10.0,DYNAMIC_UNSAFE_AI,eMBB peak surge,1.5,9.0,1.0,11.5,3.0,7.0,0.5,10.5,1.5,7.0,0.5,9.0,2.0,0.5,0.0,10.15,0.0,0,UNSAFE_BLIND,0.67
+11,11.0,DYNAMIC_UNSAFE_AI,eMBB sustained surge,1.2,8.5,1.0,10.7,3.0,9.0,0.5,12.5,1.2,8.5,0.5,10.0,0.0,0.5,16.67,30.15,0.0,1,UNSAFE_BLIND,-5.2505
+12,12.0,DYNAMIC_UNSAFE_AI,eMBB surge subsiding,1.0,7.5,1.0,9.5,3.0,9.0,0.5,12.5,1.0,7.5,0.5,9.0,0.0,0.5,0.0,10.15,0.0,0,UNSAFE_BLIND,0.72
+13,13.0,DYNAMIC_UNSAFE_AI,Congestion recovery,1.0,5.0,1.0,7.0,3.0,7.0,0.5,10.5,1.0,5.0,0.5,6.5,0.0,0.5,0.0,10.15,0.0,0,UNSAFE_BLIND,0.47
+14,14.0,DYNAMIC_UNSAFE_AI,Recovery to normal,1.0,4.0,1.0,6.0,3.0,7.0,0.5,10.5,1.0,4.0,0.5,5.5,0.0,0.5,0.0,10.15,0.0,0,UNSAFE_BLIND,0.37
+15,15.0,DYNAMIC_UNSAFE_AI,Normal steady state,1.1,3.5,1.0,5.6,3.0,7.0,0.5,10.5,1.1,3.5,0.5,5.1,0.0,0.5,0.0,10.15,0.0,0,UNSAFE_BLIND,0.32
+16,16.0,DYNAMIC_UNSAFE_AI,Normal steady state,1.0,3.0,1.0,5.0,3.0,5.0,2.0,10.0,1.0,3.0,1.0,5.0,0.0,0.0,0.0,10.15,0.0,0,UNSAFE_BLIND,0.27
+17,17.0,DYNAMIC_UNSAFE_AI,Normal steady state,1.0,3.0,1.0,5.0,3.0,5.0,2.0,10.0,1.0,3.0,1.0,5.0,0.0,0.0,0.0,10.15,0.0,0,UNSAFE_BLIND,0.27
+18,18.0,DYNAMIC_UNSAFE_AI,Normal steady state,1.0,3.2,1.0,5.2,3.0,3.0,4.0,10.0,1.0,3.0,1.0,5.0,0.2,0.0,0.0,10.15,0.0,0,UNSAFE_BLIND,0.27
+19,19.0,DYNAMIC_UNSAFE_AI,Security tunnel check,1.2,3.0,1.0,5.2,3.0,3.0,4.0,10.0,1.2,3.0,1.0,5.2,0.0,0.0,0.0,10.15,0.0,0,UNSAFE_BLIND,0.27
+20,20.0,DYNAMIC_UNSAFE_AI,Final baseline step,1.0,3.0,1.0,5.0,3.0,2.0,5.0,10.0,1.0,2.0,1.0,4.0,1.0,0.0,0.0,10.15,0.0,0,UNSAFE_BLIND,0.17

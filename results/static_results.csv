@@ -1,0 +1,21 @@
+step,time_s,mode,description,urllc_offered_mbps,embb_offered_mbps,be_offered_mbps,total_offered_mbps,urllc_alloc_mbps,embb_alloc_mbps,be_alloc_mbps,total_alloc_mbps,urllc_tput_mbps,embb_tput_mbps,be_tput_mbps,total_tput_mbps,embb_dropped_mbps,be_dropped_mbps,queue_occupancy_pkts,simulated_urllc_rtt_ms,urllc_packet_loss_pct,sla_violation,guardrail_status,reward
+1,1.0,STATIC_SLICING,Normal traffic,1.0,3.0,1.0,5.0,3.0,5.0,2.0,10.0,1.0,3.0,1.0,5.0,0.0,0.0,0.0,10.15,0.0,0,NOT_APPLICABLE,0.0
+2,2.0,STATIC_SLICING,Normal traffic,1.0,3.5,1.0,5.5,3.0,5.0,2.0,10.0,1.0,3.5,1.0,5.5,0.0,0.0,0.0,10.15,0.0,0,NOT_APPLICABLE,0.0
+3,3.0,STATIC_SLICING,Normal traffic,1.2,3.0,1.0,5.2,3.0,5.0,2.0,10.0,1.2,3.0,1.0,5.2,0.0,0.0,0.0,10.15,0.0,0,NOT_APPLICABLE,0.0
+4,4.0,STATIC_SLICING,Normal traffic,1.0,4.0,1.0,6.0,3.0,5.0,2.0,10.0,1.0,4.0,1.0,6.0,0.0,0.0,0.0,10.15,0.0,0,NOT_APPLICABLE,0.0
+5,5.0,STATIC_SLICING,Normal traffic,1.1,4.2,1.0,6.3,3.0,5.0,2.0,10.0,1.1,4.2,1.0,6.3,0.0,0.0,0.0,10.15,0.0,0,NOT_APPLICABLE,0.0
+6,6.0,STATIC_SLICING,eMBB surge start,1.5,7.0,1.0,9.5,3.0,5.0,2.0,10.0,1.5,5.0,1.0,7.5,2.0,0.0,0.0,10.15,0.0,0,NOT_APPLICABLE,0.0
+7,7.0,STATIC_SLICING,eMBB high surge,1.5,8.5,1.0,11.0,3.0,5.0,2.0,10.0,1.5,5.0,1.0,7.5,3.5,0.0,0.0,10.15,0.0,0,NOT_APPLICABLE,0.0
+8,8.0,STATIC_SLICING,eMBB peak surge,1.8,9.2,1.0,12.0,3.0,5.0,2.0,10.0,1.8,5.0,1.0,7.8,4.2,0.0,0.0,10.15,0.0,0,NOT_APPLICABLE,0.0
+9,9.0,STATIC_SLICING,eMBB peak surge,1.8,9.5,1.0,12.3,3.0,5.0,2.0,10.0,1.8,5.0,1.0,7.8,4.5,0.0,0.0,10.15,0.0,0,NOT_APPLICABLE,0.0
+10,10.0,STATIC_SLICING,eMBB peak surge,1.5,9.0,1.0,11.5,3.0,5.0,2.0,10.0,1.5,5.0,1.0,7.5,4.0,0.0,0.0,10.15,0.0,0,NOT_APPLICABLE,0.0
+11,11.0,STATIC_SLICING,eMBB sustained surge,1.2,8.5,1.0,10.7,3.0,5.0,2.0,10.0,1.2,5.0,1.0,7.2,3.5,0.0,0.0,10.15,0.0,0,NOT_APPLICABLE,0.0
+12,12.0,STATIC_SLICING,eMBB surge subsiding,1.0,7.5,1.0,9.5,3.0,5.0,2.0,10.0,1.0,5.0,1.0,7.0,2.5,0.0,0.0,10.15,0.0,0,NOT_APPLICABLE,0.0
+13,13.0,STATIC_SLICING,Congestion recovery,1.0,5.0,1.0,7.0,3.0,5.0,2.0,10.0,1.0,5.0,1.0,7.0,0.0,0.0,0.0,10.15,0.0,0,NOT_APPLICABLE,0.0
+14,14.0,STATIC_SLICING,Recovery to normal,1.0,4.0,1.0,6.0,3.0,5.0,2.0,10.0,1.0,4.0,1.0,6.0,0.0,0.0,0.0,10.15,0.0,0,NOT_APPLICABLE,0.0
+15,15.0,STATIC_SLICING,Normal steady state,1.1,3.5,1.0,5.6,3.0,5.0,2.0,10.0,1.1,3.5,1.0,5.6,0.0,0.0,0.0,10.15,0.0,0,NOT_APPLICABLE,0.0
+16,16.0,STATIC_SLICING,Normal steady state,1.0,3.0,1.0,5.0,3.0,5.0,2.0,10.0,1.0,3.0,1.0,5.0,0.0,0.0,0.0,10.15,0.0,0,NOT_APPLICABLE,0.0
+17,17.0,STATIC_SLICING,Normal steady state,1.0,3.0,1.0,5.0,3.0,5.0,2.0,10.0,1.0,3.0,1.0,5.0,0.0,0.0,0.0,10.15,0.0,0,NOT_APPLICABLE,0.0
+18,18.0,STATIC_SLICING,Normal steady state,1.0,3.2,1.0,5.2,3.0,5.0,2.0,10.0,1.0,3.2,1.0,5.2,0.0,0.0,0.0,10.15,0.0,0,NOT_APPLICABLE,0.0
+19,19.0,STATIC_SLICING,Security tunnel check,1.2,3.0,1.0,5.2,3.0,5.0,2.0,10.0,1.2,3.0,1.0,5.2,0.0,0.0,0.0,10.15,0.0,0,NOT_APPLICABLE,0.0
+20,20.0,STATIC_SLICING,Final baseline step,1.0,3.0,1.0,5.0,3.0,5.0,2.0,10.0,1.0,3.0,1.0,5.0,0.0,0.0,0.0,10.15,0.0,0,NOT_APPLICABLE,0.0
